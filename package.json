@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "zodforge": "./dist/cli.js"
+    "zodforge": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -37,8 +37,7 @@
     "url": "git+https://github.com/rusl-labs/zodforge.git"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "engines": {
     "node": ">=18"
