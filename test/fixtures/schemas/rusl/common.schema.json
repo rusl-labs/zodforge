@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resources.rusl.com/resources/rusl/schemas/common",
+  "title": "Common Definitions",
+  "description": "Reusable definitions for rusl identifiers, slugs, and version requirements.",
+  "version": "0.1.0",
+  "$defs": {
+    "account-slug": {
+      "description": "A URL-safe account identifier",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 25,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9\\-]*$"
+    },
+    "schema-ref": {
+      "description": "A schema reference in 'account-slug/schemas/schema-slug' format",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9\\-]*/schemas/[A-Za-z0-9][A-Za-z0-9\\-]*$"
+    }
+  }
+}

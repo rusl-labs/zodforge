@@ -11,6 +11,7 @@ import {
 function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
   const ids = new Map<string, string>();
   const paths = new Map<string, string>();
+  const exportNames = new Map<string, string>();
 
   for (const schema of schemas) {
     if (schema.id) {
@@ -30,6 +31,34 @@ function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
       );
     }
     paths.set(schema.pathId, schema.sourcePath);
+
+    if (!schema.isDefsOnly) {
+      const existingExport = exportNames.get(schema.schemaExport);
+      if (existingExport) {
+        throw new Error(
+          `Duplicate export "${schema.schemaExport}" in ${schema.sourcePath} and ${existingExport}`,
+        );
+      }
+      exportNames.set(schema.schemaExport, schema.sourcePath);
+    }
+
+    for (const def of schema.defs) {
+      const existingDefPath = paths.get(def.pathId);
+      if (existingDefPath) {
+        throw new Error(
+          `Duplicate def pathId "${def.pathId}" in ${schema.sourcePath} and ${existingDefPath}`,
+        );
+      }
+      paths.set(def.pathId, schema.sourcePath);
+
+      const existingDefExport = exportNames.get(def.schemaExport);
+      if (existingDefExport) {
+        throw new Error(
+          `Duplicate def export "${def.schemaExport}" in ${schema.sourcePath} and ${existingDefExport}`,
+        );
+      }
+      exportNames.set(def.schemaExport, schema.sourcePath);
+    }
   }
 }
 
@@ -65,10 +94,20 @@ export async function forgeSchemas(
   };
 
   for (const compiled of compiledSchemas) {
-    result[compiled.schemaExport] = compiled.schema;
-    result.byPath[compiled.pathId] = compiled.schema;
-    if (compiled.id) {
-      result.byId[compiled.id] = compiled.schema;
+    if (!compiled.isDefsOnly) {
+      result[compiled.schemaExport] = compiled.schema;
+      result.byPath[compiled.pathId] = compiled.schema;
+      if (compiled.id) {
+        result.byId[compiled.id] = compiled.schema;
+      }
+    }
+
+    for (const def of compiled.defs) {
+      result[def.schemaExport] = def.schema;
+      result.byPath[def.pathId] = def.schema;
+      if (def.id) {
+        result.byId[def.id] = def.schema;
+      }
     }
   }
 

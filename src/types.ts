@@ -36,6 +36,19 @@ export interface ResolvedSchemaFile {
   relativePath: string;
 }
 
+export interface CompiledDef {
+  defKey: string;
+  refPath: string;
+  pathId: string;
+  id?: string;
+  schema: ZodType;
+  schemaExport: string;
+  typeExport: string;
+  typeInputExport: string;
+  title?: string;
+  description?: string;
+}
+
 export interface CompiledSchema {
   schema: ZodType;
   pathId: string;
@@ -49,6 +62,15 @@ export interface CompiledSchema {
   id?: string;
   title?: string;
   description?: string;
+  defs: CompiledDef[];
+  isDefsOnly: boolean;
+}
+
+export interface LookupEntry {
+  pathId: string;
+  schemaExport: string;
+  importPath: string;
+  id?: string;
 }
 
 export interface ForgeResult {

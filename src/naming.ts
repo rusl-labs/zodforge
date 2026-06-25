@@ -45,6 +45,37 @@ export function jsonImportVarName(stem: string): string {
   return `${toCamelCase(stem)}Json`;
 }
 
+export function defSchemaExportName(schemaStem: string, defKey: string): string {
+  return `${toCamelCase(schemaStem)}Def${toPascalCase(defKey)}Schema`;
+}
+
+export function defTypeExportName(schemaStem: string, defKey: string): string {
+  return `${toPascalCase(schemaStem)}Def${toPascalCase(defKey)}`;
+}
+
+export function defTypeInputExportName(
+  schemaStem: string,
+  defKey: string,
+): string {
+  return `${toPascalCase(schemaStem)}Def${toPascalCase(defKey)}Input`;
+}
+
+export function defPathId(
+  schemaPathId: string,
+  defKey: string,
+  defsSegment: "$defs" | "definitions" = "$defs",
+): string {
+  return `${schemaPathId}#/${defsSegment}/${defKey}`;
+}
+
+export function defDocumentId(
+  schemaId: string,
+  defKey: string,
+  defsSegment: "$defs" | "definitions" = "$defs",
+): string {
+  return `${schemaId}#/${defsSegment}/${defKey}`;
+}
+
 export function isValidIdentifier(value: string): boolean {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value);
 }

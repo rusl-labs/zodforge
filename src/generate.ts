@@ -15,6 +15,7 @@ import {
   MANIFEST_FILENAME,
   type CompiledSchema,
   type GenerateOptions,
+  type LookupEntry,
   type ZodforgeManifest,
 } from "./types.js";
 
@@ -61,9 +62,40 @@ function getBarrelExportEntries(
   return [...entries].sort((left, right) => left.localeCompare(right));
 }
 
+function buildLookupEntries(
+  compiledSchemas: CompiledSchema[],
+): LookupEntry[] {
+  const entries: LookupEntry[] = [];
+
+  for (const schema of compiledSchemas) {
+    const importPath = `./${schema.pathId}`.replace(/\\/g, "/");
+
+    if (!schema.isDefsOnly) {
+      entries.push({
+        pathId: schema.pathId,
+        schemaExport: schema.schemaExport,
+        importPath,
+        id: schema.id,
+      });
+    }
+
+    for (const def of schema.defs) {
+      entries.push({
+        pathId: def.pathId,
+        schemaExport: def.schemaExport,
+        importPath,
+        id: def.id,
+      });
+    }
+  }
+
+  return entries.sort((left, right) => left.pathId.localeCompare(right.pathId));
+}
+
 function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
   const ids = new Map<string, string>();
   const paths = new Map<string, string>();
+  const exportNames = new Map<string, string>();
 
   for (const schema of schemas) {
     if (schema.id) {
@@ -83,6 +115,34 @@ function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
       );
     }
     paths.set(schema.pathId, schema.sourcePath);
+
+    if (!schema.isDefsOnly) {
+      const existingExport = exportNames.get(schema.schemaExport);
+      if (existingExport) {
+        throw new Error(
+          `Duplicate export "${schema.schemaExport}" in ${schema.sourcePath} and ${existingExport}`,
+        );
+      }
+      exportNames.set(schema.schemaExport, schema.sourcePath);
+    }
+
+    for (const def of schema.defs) {
+      const existingDefPath = paths.get(def.pathId);
+      if (existingDefPath) {
+        throw new Error(
+          `Duplicate def pathId "${def.pathId}" in ${schema.sourcePath} and ${existingDefPath}`,
+        );
+      }
+      paths.set(def.pathId, schema.sourcePath);
+
+      const existingDefExport = exportNames.get(def.schemaExport);
+      if (existingDefExport) {
+        throw new Error(
+          `Duplicate def export "${def.schemaExport}" in ${schema.sourcePath} and ${existingDefExport}`,
+        );
+      }
+      exportNames.set(def.schemaExport, schema.sourcePath);
+    }
   }
 }
 
@@ -150,7 +210,7 @@ export async function generateSchemas(
   const lookupRelativePath = "_lookup.ts";
   await writeGeneratedFile(
     join(outputDir, lookupRelativePath),
-    renderLookupFile(compiledSchemas),
+    renderLookupFile(buildLookupEntries(compiledSchemas)),
   );
   generatedFiles.push(lookupRelativePath);
 

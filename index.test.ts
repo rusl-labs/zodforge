@@ -12,6 +12,8 @@ import {
   schemaExportName,
   stemFromFilename,
   typeExportName,
+  defSchemaExportName,
+  defTypeExportName,
   MANIFEST_FILENAME,
 } from "./src/index.ts";
 import { verifyGeneratedSchemas } from "./src/verify.ts";
@@ -40,6 +42,18 @@ describe("naming", () => {
     expect(schemaExportName("baz")).toBe("bazSchema");
     expect(typeExportName("baz")).toBe("Baz");
   });
+
+  test("def export names are prefixed by schema stem", () => {
+    expect(defSchemaExportName("common", "account-slug")).toBe(
+      "commonDefAccountSlugSchema",
+    );
+    expect(defTypeExportName("common", "account-slug")).toBe(
+      "CommonDefAccountSlug",
+    );
+    expect(defSchemaExportName("common", "schema-ref")).toBe(
+      "commonDefSchemaRefSchema",
+    );
+  });
 });
 
 describe("resolve", () => {
@@ -67,9 +81,34 @@ describe("forgeSchemas", () => {
 
     expect(forged.trustSignalSchema).toBeDefined();
     expect(forged.contextRequestSchema).toBeDefined();
+    expect(forged.commonDefAccountSlugSchema).toBeDefined();
     expect(forged.byPath["rusl/trust-signal"]).toBe(forged.trustSignalSchema);
+    expect(forged.byPath["rusl/common#/$defs/account-slug"]).toBe(
+      forged.commonDefAccountSlugSchema,
+    );
+    expect(
+      forged.byId[
+        "https://resources.rusl.com/resources/rusl/schemas/common#/$defs/account-slug"
+      ],
+    ).toBe(forged.commonDefAccountSlugSchema);
     expect(forged.byId["https://resources.rusl.com/schemas/rusl/trust-signal"]).toBe(
       forged.trustSignalSchema,
+    );
+  });
+
+  test("def schemas validate independently of defs-only root", async () => {
+    const forged = await forgeSchemas({
+      cwd: import.meta.dir,
+      schemasDir: "./test/fixtures/schemas",
+      path: "./test/fixtures/schemas/rusl/common.schema.json",
+    });
+
+    expect(forged.commonSchema).toBeUndefined();
+    expect(forged.commonDefAccountSlugSchema.safeParse("ab").success).toBe(
+      false,
+    );
+    expect(forged.commonDefAccountSlugSchema.safeParse("my-account").success).toBe(
+      true,
     );
   });
 
@@ -160,6 +199,19 @@ describe("generateSchemas", () => {
     );
     expect(trustSignal).toContain('pathId: "rusl/trust-signal"');
     expect(trustSignal).toContain("export type TrustSignal = z.infer");
+
+    const common = await readFile(
+      join(generatedRoot, "rusl/common.ts"),
+      "utf8",
+    );
+    expect(common).not.toContain("export const commonSchema");
+    expect(common).toContain("export const commonDefAccountSlugSchema");
+    expect(common).toContain('pathId: "rusl/common#/$defs/account-slug"');
+    expect(common).toContain('$ref: "#/$defs/account-slug"');
+
+    const lookup = await readFile(join(generatedRoot, "_lookup.ts"), "utf8");
+    expect(lookup).toContain("commonDefAccountSlugSchema");
+    expect(lookup).not.toContain("commonSchema");
 
     const fooBarrel = await readFile(join(generatedRoot, "foo/index.ts"), "utf8");
     expect(fooBarrel).toContain('export * from "./baz";');

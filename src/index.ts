@@ -8,6 +8,11 @@ export {
   stemFromFilename,
   typeExportName,
   typeInputExportName,
+  defSchemaExportName,
+  defTypeExportName,
+  defTypeInputExportName,
+  defPathId,
+  defDocumentId,
 } from "./naming.js";
 export { computePathId, resolveSchemaFiles } from "./resolve.js";
 export {
@@ -18,10 +23,12 @@ export {
 } from "./types.js";
 export type {
   CleanOptions,
+  CompiledDef,
   CompiledSchema,
   ForgeOptions,
   ForgeResult,
   GenerateOptions,
+  LookupEntry,
   ResolvedSchemaFile,
   ZodforgeManifest,
 } from "./types.js";
