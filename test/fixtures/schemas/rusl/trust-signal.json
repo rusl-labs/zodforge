@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resources.rusl.com/schemas/rusl/trust-signal",
+  "title": "Trust Signal",
+  "description": "A trust signal emitted by a Rusl agent",
+  "type": "object",
+  "properties": {
+    "signal": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["signal", "confidence"],
+  "additionalProperties": false
+}

@@ -1,0 +1,5 @@
+dist/
+src/schemas/
+.zodforge-manifest.json
+node_modules/
+.cursor/

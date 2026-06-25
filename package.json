@@ -1,0 +1,60 @@
+{
+  "name": "@rusl-labs/zodforge",
+  "version": "0.1.0",
+  "description": "Codegen CLI that mirrors JSON Schema paths into generated Zod modules",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "zodforge": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "bun test",
+    "prepublishOnly": "bun run build",
+    "schemas:sync": "rusl install && bun run schemas:generate",
+    "schemas:generate": "bun dist/cli.js generate",
+    "schemas:clean": "bun dist/cli.js clean",
+    "schemas:verify": "bun scripts/verify-schemas.ts",
+    "preschemas:generate": "bun run build",
+    "preschemas:clean": "bun run build",
+    "preschemas:verify": "bun run build"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rusl-labs/zodforge.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "tinyglobby": "^0.2.17"
+  },
+  "peerDependencies": {
+    "typescript": "^5",
+    "zod": "^4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^26.0.1",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resources.rusl.com/schemas/foo/bar/qux",
+  "title": "Qux",
+  "type": "object",
+  "properties": {
+    "value": { "type": "integer" }
+  },
+  "required": ["value"],
+  "additionalProperties": false
+}
