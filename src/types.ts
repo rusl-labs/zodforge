@@ -1,9 +1,31 @@
 import type { ZodType } from "zod";
+import type { NamingMode } from "./naming.js";
 
 export const DEFAULT_SCHEMA_GLOB = "./schemas/**/*.json";
 export const DEFAULT_SCHEMAS_DIR = "./schemas";
 export const DEFAULT_OUTPUT_DIR = "./src/schemas";
 export const MANIFEST_FILENAME = ".zodforge-manifest.json";
+
+export type OutputKind = "raw" | "zod";
+
+export interface JsonSchemaDocument {
+  $id?: string;
+  $schema?: string;
+  title?: string;
+  description?: string;
+  $ref?: string;
+  type?: string | string[];
+  const?: unknown;
+  enum?: unknown[];
+  allOf?: unknown[];
+  anyOf?: unknown[];
+  oneOf?: unknown[];
+  properties?: Record<string, unknown>;
+  items?: unknown;
+  $defs?: Record<string, JsonSchemaDocument>;
+  definitions?: Record<string, JsonSchemaDocument>;
+  [key: string]: unknown;
+}
 
 export interface GenerateOptions {
   path?: string;
@@ -11,6 +33,7 @@ export interface GenerateOptions {
   schemasDir?: string;
   outputDir?: string;
   pathPrefix?: string;
+  naming?: NamingMode;
   cleanBeforeGenerate?: boolean;
 }
 
@@ -25,7 +48,7 @@ export interface ForgeOptions {
   cwd?: string;
   schemasDir?: string;
   pathPrefix?: string;
-  suffix?: string;
+  naming?: NamingMode;
   register?: boolean;
 }
 
@@ -42,33 +65,59 @@ export interface CompiledDef {
   pathId: string;
   id?: string;
   schema: ZodType;
-  schemaExport: string;
+  zodExport: string;
   typeExport: string;
   typeInputExport: string;
   title?: string;
   description?: string;
+}
+
+/** An external `$ref` rewritten to an import of another generated Zod export. */
+export interface ExternalZodDep {
+  /** Original `$ref` string as it appears in the JSON Schema */
+  ref: string;
+  /** pathId of the module that owns the export */
+  pathId: string;
+  /** Binding name to import, e.g. `zPragmaticGeoDefPoint` */
+  zodExport: string;
 }
 
 export interface CompiledSchema {
   schema: ZodType;
   pathId: string;
-  schemaExport: string;
+  stem: string;
+  rawExport: string;
+  rawTypeExport: string;
+  zodExport: string;
   typeExport: string;
   typeInputExport: string;
   jsonImportVar: string;
   jsonImportPath: string;
   sourcePath: string;
-  outputRelativePath: string;
+  rawOutputRelativePath: string;
+  zodOutputRelativePath: string;
+  /** Original vendored document — external `$ref`s preserved. */
+  rawJson: JsonSchemaDocument;
   id?: string;
   title?: string;
   description?: string;
   defs: CompiledDef[];
   isDefsOnly: boolean;
+  /** Sibling Zod exports this module must import to satisfy external `$ref`s. */
+  externalDeps: ExternalZodDep[];
+  hasExternalRefs: boolean;
 }
 
-export interface LookupEntry {
+export interface ZodLookupEntry {
   pathId: string;
-  schemaExport: string;
+  zodExport: string;
+  importPath: string;
+  id?: string;
+}
+
+export interface RawLookupEntry {
+  pathId: string;
+  rawExport: string;
   importPath: string;
   id?: string;
 }
@@ -76,7 +125,13 @@ export interface LookupEntry {
 export interface ForgeResult {
   byId: Record<string, ZodType>;
   byPath: Record<string, ZodType>;
-  [exportName: string]: ZodType | Record<string, ZodType>;
+  rawByPath: Record<string, JsonSchemaDocument>;
+  rawById: Record<string, JsonSchemaDocument>;
+  [exportName: string]:
+    | ZodType
+    | JsonSchemaDocument
+    | Record<string, ZodType>
+    | Record<string, JsonSchemaDocument>;
 }
 
 export interface ZodforgeManifest {

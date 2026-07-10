@@ -1,2 +1,3 @@
 [rusl.resources]
 "rusl/schemas/common" = ">=0.0.0"
+"pragmatic/schemas/us-address" = ">=0.0.0"

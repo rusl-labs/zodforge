@@ -18,7 +18,11 @@ Defaults: `./schemas/**/*.json` → `./src/schemas/`. No install or build step r
 Import the generated modules in your app (requires `zod` in your project):
 
 ```ts
-import { profileSchema, type Profile } from "./src/schemas/user/profile";
+import { profileRaw } from "./src/schemas/user/profile.raw";
+import {
+  zUserProfile,
+  type UserProfile,
+} from "./src/schemas/user/profile.zod";
 ```
 
 For repeated use, add it as a dev dependency:
@@ -35,7 +39,8 @@ Then `npx zodforge generate`, `npx zodforge clean`, etc.
 schemas/**/*.json            ← your JSON Schema files
         │
         ▼  zodforge generate
-src/schemas/**/*.ts          ← generated (do not edit)
+src/schemas/**/*.raw.ts       ← raw JSON Schema exports (do not edit)
+src/schemas/**/*.zod.ts       ← generated Zod modules (do not edit)
         │
         ▼  import
 your app
@@ -135,41 +140,58 @@ Generated modules import JSON from your schemas directory:
 
 ### 5. Import in application code
 
-Each schema file exports a Zod schema, inferred types, and input types:
+Each schema file produces two generated modules — raw (validator-agnostic) and zod:
 
 ```ts
-// Direct import — best for IDE navigation
-import { profileSchema, type Profile } from "./schemas/user/profile";
+// Raw JSON Schema — unconstrained escape hatch for AJV, docs, introspection
+import { userProfileRaw } from "./schemas/user/profile.raw";
 
-const parsed = profileSchema.parse({ /* … */ });
+// Zod validation
+import {
+  zUserProfile,
+  type UserProfile,
+} from "./schemas/user/profile.zod";
+
+const parsed = zUserProfile.parse({ /* … */ });
+ajv.compile(userProfileRaw);
 
 // Barrel import from a directory
-import { profileSchema } from "./schemas/user";
+import { zUserProfile } from "./schemas/user";
 
-// Root barrel + lookup registry
-import { profileSchema, getSchemaByIdentifier } from "./schemas";
+// Lookup registries
+import { getSchemaByIdentifier } from "./schemas/_lookup.zod";
+import { getRawSchemaByIdentifier } from "./schemas/_lookup.raw";
 
 const byPath = getSchemaByIdentifier("user/profile");
-const byId = getSchemaByIdentifier("https://example.com/schemas/user/profile");
+const rawByPath = getRawSchemaByIdentifier("user/profile");
 ```
 
-Generated files use `z.fromJSONSchema(json).meta({ id, title, description, pathId })`.
+Generated zod files use `z.fromJSONSchema(raw)` when a schema is self-contained. When it has external `$ref`s (e.g. Rusl `https://resources.rusl.com/...#/$defs/...`), zodforge wires them to **imports of the target Zod exports** and compiles via a small `_compile.ts` helper — so `us-address` reuses `zPragmaticGeoDefPoint` instead of inlining a copy. Referenced schemas must be in the same generate set and match by `$id` (Rusl `/schemas/` aliases included). Raw exports always keep the original `$ref` URIs.
 
 ### 6. What gets generated
 
-For each `schemas/foo/bar.json`, zodforge writes a mirrored module:
+For each `schemas/foo/bar.json`, zodforge writes two mirrored modules:
 
 ```
-schemas/user/profile.json  →  src/schemas/user/profile.ts
+schemas/user/profile.json  →  src/schemas/user/profile.raw.ts
+                           →  src/schemas/user/profile.zod.ts
 ```
 
 Plus:
 
-- `index.ts` barrel in each directory
-- `_lookup.ts` at the output root with `byPath`, `byId`, and `getSchemaByIdentifier()`
+- `index.ts` barrel in each directory (re-exports `*.raw.ts` and `*.zod.ts`)
+- `_lookup.raw.ts` at the output root with `rawByPath`, `rawById`, and `getRawSchemaByIdentifier()`
+- `_lookup.zod.ts` at the output root with `byPath`, `byId`, and `getSchemaByIdentifier()`
 - `.zodforge-manifest.json` (used by `zodforge clean`)
 
-Naming: `profile.json` → `profileSchema`, types `Profile` and `ProfileInput`.
+**Naming (default: `full`):** export names derive from the full schema path to avoid collisions across accounts:
+
+| pathId | Raw | Zod | Type |
+|--------|-----|-----|------|
+| `user/profile` | `userProfileRaw` | `zUserProfile` | `UserProfile` |
+| `rusl/schemas/common` | `ruslSchemasCommonRaw` | `zRuslSchemasCommon` | `RuslSchemasCommon` |
+
+Use `--naming short` for filename-only names when paths are unique (`profileRaw`, `zProfile`).
 
 ### 7. CLI reference
 
@@ -184,6 +206,7 @@ zodforge clean [options]
 | `-o, --output-dir <dir>` | `./src/schemas` | Generated output directory |
 | `--schemas-dir <dir>` | `./schemas` | Root for resolving JSON imports |
 | `--path-prefix <prefix>` | — | Strip prefix from `pathId` values |
+| `--naming <mode>` | `full` | Export naming: `full` (path-based) or `short` (filename-only) |
 | `--cwd <dir>` | `process.cwd()` | Working directory |
 
 `zodforge clean` removes files listed in `.zodforge-manifest.json`. `generate` always does a full wipe of the output dir before writing.
@@ -212,7 +235,7 @@ import {
 await generateSchemas({ outputDir: "./src/schemas" });
 
 const result = await verifyGeneratedSchemas();
-const { profileSchema } = forgeSchemas({ path: "./schemas/**/*.json" });
+const { zUserProfile, userProfileRaw } = forgeSchemas({ path: "./schemas/**/*.json" });
 await cleanGeneratedSchemas();
 ```
 

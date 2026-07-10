@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { compileSchemaFile } from "./compile.js";
+import { compileLoadedSchemas, loadSchemas } from "./compile.js";
 import { resolveSchemaFiles } from "./resolve.js";
 import {
   DEFAULT_SCHEMAS_DIR,
@@ -32,14 +32,22 @@ function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
     }
     paths.set(schema.pathId, schema.sourcePath);
 
+    const existingRawExport = exportNames.get(schema.rawExport);
+    if (existingRawExport) {
+      throw new Error(
+        `Duplicate export "${schema.rawExport}" in ${schema.sourcePath} and ${existingRawExport}`,
+      );
+    }
+    exportNames.set(schema.rawExport, schema.sourcePath);
+
     if (!schema.isDefsOnly) {
-      const existingExport = exportNames.get(schema.schemaExport);
-      if (existingExport) {
+      const existingZodExport = exportNames.get(schema.zodExport);
+      if (existingZodExport) {
         throw new Error(
-          `Duplicate export "${schema.schemaExport}" in ${schema.sourcePath} and ${existingExport}`,
+          `Duplicate export "${schema.zodExport}" in ${schema.sourcePath} and ${existingZodExport}`,
         );
       }
-      exportNames.set(schema.schemaExport, schema.sourcePath);
+      exportNames.set(schema.zodExport, schema.sourcePath);
     }
 
     for (const def of schema.defs) {
@@ -51,13 +59,13 @@ function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
       }
       paths.set(def.pathId, schema.sourcePath);
 
-      const existingDefExport = exportNames.get(def.schemaExport);
+      const existingDefExport = exportNames.get(def.zodExport);
       if (existingDefExport) {
         throw new Error(
-          `Duplicate def export "${def.schemaExport}" in ${schema.sourcePath} and ${existingDefExport}`,
+          `Duplicate def export "${def.zodExport}" in ${schema.sourcePath} and ${existingDefExport}`,
         );
       }
-      exportNames.set(def.schemaExport, schema.sourcePath);
+      exportNames.set(def.zodExport, schema.sourcePath);
     }
   }
 }
@@ -74,28 +82,30 @@ export async function forgeSchemas(
     pathPrefix: options.pathPrefix,
   });
 
-  const compiledSchemas: CompiledSchema[] = [];
-
-  for (const file of resolvedFiles) {
-    const compiled = await compileSchemaFile(file.absolutePath, {
-      schemasDir,
-      pathPrefix: options.pathPrefix,
-      suffix: options.suffix,
-      register: options.register,
-    });
-    compiledSchemas.push(compiled);
-  }
+  const loaded = await loadSchemas({ files: resolvedFiles });
+  const compiledSchemas = compileLoadedSchemas(loaded, {
+    naming: options.naming,
+    register: options.register,
+  });
 
   assertUniqueIdentifiers(compiledSchemas);
 
   const result: ForgeResult = {
     byId: {},
     byPath: {},
+    rawByPath: {},
+    rawById: {},
   };
 
   for (const compiled of compiledSchemas) {
+    result[compiled.rawExport] = compiled.rawJson;
+    result.rawByPath[compiled.pathId] = compiled.rawJson;
+    if (compiled.id) {
+      result.rawById[compiled.id] = compiled.rawJson;
+    }
+
     if (!compiled.isDefsOnly) {
-      result[compiled.schemaExport] = compiled.schema;
+      result[compiled.zodExport] = compiled.schema;
       result.byPath[compiled.pathId] = compiled.schema;
       if (compiled.id) {
         result.byId[compiled.id] = compiled.schema;
@@ -103,7 +113,7 @@ export async function forgeSchemas(
     }
 
     for (const def of compiled.defs) {
-      result[def.schemaExport] = def.schema;
+      result[def.zodExport] = def.schema;
       result.byPath[def.pathId] = def.schema;
       if (def.id) {
         result.byId[def.id] = def.schema;

@@ -73,7 +73,12 @@ bun run schemas:verify     # fail if src/schemas/ is stale
 bun run schemas:clean      # remove zodforge output only
 ```
 
-Import derived modules — e.g. `import { commonSchema } from "./src/schemas/rusl/schemas/common"`.
+Import derived modules — e.g.:
+
+```ts
+import { ruslSchemasCommonRaw } from "./src/schemas/rusl/schemas/common.raw";
+import { zRuslSchemasCommonDefAccountSlug } from "./src/schemas/rusl/schemas/common.zod";
+```
 
 ---
 

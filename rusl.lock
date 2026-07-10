@@ -1,5 +1,24 @@
 version = "1"
 
+[dependencies."schema:pragmatic/schemas/geo"]
+version = "0.1.0"
+integrity = "8894e94c693c101964cd816797e16c17cd45c0b4954cee7adddd2eee0371cdd7"
+source = "https://resources.rusl.com"
+
+[dependencies."schema:pragmatic/schemas/subdivision-code"]
+version = "0.1.0"
+integrity = "1c74cce37bfbbd9dc5c402b7692b4c525d084138840d497eb571cedcb9063672"
+source = "https://resources.rusl.com"
+
+[dependencies."schema:pragmatic/schemas/us-address"]
+version = "0.1.0"
+integrity = "8514b8eb2327d79571a7ec299ae854e5f3b393f66dd668c0c1bd4b923f52ac7c"
+source = "https://resources.rusl.com"
+dependencies = [
+    "schema:pragmatic/schemas/geo",
+    "schema:pragmatic/schemas/subdivision-code",
+]
+
 [dependencies."schema:rusl/schemas/common"]
 version = "0.1.0"
 integrity = "225fadafd14383473cdf522c85e511339fa457895fd504004b594e350b41e25a"

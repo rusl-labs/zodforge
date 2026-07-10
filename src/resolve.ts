@@ -3,6 +3,7 @@ import { dirname, relative, resolve } from "node:path";
 import {
   DEFAULT_SCHEMA_GLOB,
   DEFAULT_SCHEMAS_DIR,
+  type OutputKind,
   type ResolvedSchemaFile,
 } from "./types.js";
 import { stemFromFilename } from "./naming.js";
@@ -30,8 +31,11 @@ export function computePathId(
   return pathId;
 }
 
-export function computeOutputRelativePath(pathId: string): string {
-  return `${pathId}.ts`;
+export function computeOutputRelativePath(
+  pathId: string,
+  kind: OutputKind,
+): string {
+  return `${pathId}.${kind}.ts`;
 }
 
 export async function resolveSchemaFiles(options: {
