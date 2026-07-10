@@ -1,6 +1,6 @@
 {
   "name": "@rusl-labs/zodforge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Codegen CLI that mirrors JSON Schema paths into generated Zod modules",
   "type": "module",
   "main": "./dist/index.js",

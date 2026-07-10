@@ -1,21 +1,26 @@
+import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { compileSchemaFile, computeJsonImportPath } from "./compile.js";
+import { fileURLToPath } from "node:url";
+import { compileLoadedSchemas, computeJsonImportPath, loadSchemas } from "./compile.js";
 import { wipeOutputDirectory, writeGeneratedFile } from "./fs.js";
 import { resolveSchemaFiles } from "./resolve.js";
 import {
   renderBarrelFile,
-  renderLookupFile,
+  renderCompileHelperFile,
   renderManifestFile,
+  renderRawFile,
+  renderRawLookupFile,
   renderRootIndexFile,
-  renderSchemaFile,
+  renderZodFile,
+  renderZodLookupFile,
 } from "./templates.js";
 import {
   DEFAULT_OUTPUT_DIR,
-  DEFAULT_SCHEMAS_DIR,
   MANIFEST_FILENAME,
   type CompiledSchema,
   type GenerateOptions,
-  type LookupEntry,
+  type RawLookupEntry,
+  type ZodLookupEntry,
   type ZodforgeManifest,
 } from "./types.js";
 
@@ -53,8 +58,16 @@ function getBarrelExportEntries(
     const relativeToDirectory = directory
       ? schema.pathId.slice(dirPrefix.length)
       : schema.pathId;
-    const firstSegment = relativeToDirectory.split("/")[0];
-    if (firstSegment) {
+    const segments = relativeToDirectory.split("/");
+    const firstSegment = segments[0];
+    if (!firstSegment) {
+      continue;
+    }
+
+    if (segments.length === 1) {
+      entries.add(`./${firstSegment}.raw`);
+      entries.add(`./${firstSegment}.zod`);
+    } else {
       entries.add(`./${firstSegment}`);
     }
   }
@@ -62,18 +75,18 @@ function getBarrelExportEntries(
   return [...entries].sort((left, right) => left.localeCompare(right));
 }
 
-function buildLookupEntries(
+function buildZodLookupEntries(
   compiledSchemas: CompiledSchema[],
-): LookupEntry[] {
-  const entries: LookupEntry[] = [];
+): ZodLookupEntry[] {
+  const entries: ZodLookupEntry[] = [];
 
   for (const schema of compiledSchemas) {
-    const importPath = `./${schema.pathId}`.replace(/\\/g, "/");
+    const importPath = `./${schema.pathId}.zod`.replace(/\\/g, "/");
 
     if (!schema.isDefsOnly) {
       entries.push({
         pathId: schema.pathId,
-        schemaExport: schema.schemaExport,
+        zodExport: schema.zodExport,
         importPath,
         id: schema.id,
       });
@@ -82,7 +95,7 @@ function buildLookupEntries(
     for (const def of schema.defs) {
       entries.push({
         pathId: def.pathId,
-        schemaExport: def.schemaExport,
+        zodExport: def.zodExport,
         importPath,
         id: def.id,
       });
@@ -90,6 +103,19 @@ function buildLookupEntries(
   }
 
   return entries.sort((left, right) => left.pathId.localeCompare(right.pathId));
+}
+
+function buildRawLookupEntries(
+  compiledSchemas: CompiledSchema[],
+): RawLookupEntry[] {
+  return compiledSchemas
+    .map((schema) => ({
+      pathId: schema.pathId,
+      rawExport: schema.rawExport,
+      importPath: `./${schema.pathId}.raw`.replace(/\\/g, "/"),
+      id: schema.id,
+    }))
+    .sort((left, right) => left.pathId.localeCompare(right.pathId));
 }
 
 function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
@@ -116,14 +142,22 @@ function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
     }
     paths.set(schema.pathId, schema.sourcePath);
 
+    const existingRawExport = exportNames.get(schema.rawExport);
+    if (existingRawExport) {
+      throw new Error(
+        `Duplicate export "${schema.rawExport}" in ${schema.sourcePath} and ${existingRawExport}`,
+      );
+    }
+    exportNames.set(schema.rawExport, schema.sourcePath);
+
     if (!schema.isDefsOnly) {
-      const existingExport = exportNames.get(schema.schemaExport);
-      if (existingExport) {
+      const existingZodExport = exportNames.get(schema.zodExport);
+      if (existingZodExport) {
         throw new Error(
-          `Duplicate export "${schema.schemaExport}" in ${schema.sourcePath} and ${existingExport}`,
+          `Duplicate export "${schema.zodExport}" in ${schema.sourcePath} and ${existingZodExport}`,
         );
       }
-      exportNames.set(schema.schemaExport, schema.sourcePath);
+      exportNames.set(schema.zodExport, schema.sourcePath);
     }
 
     for (const def of schema.defs) {
@@ -135,22 +169,42 @@ function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
       }
       paths.set(def.pathId, schema.sourcePath);
 
-      const existingDefExport = exportNames.get(def.schemaExport);
+      const existingDefExport = exportNames.get(def.zodExport);
       if (existingDefExport) {
         throw new Error(
-          `Duplicate def export "${def.schemaExport}" in ${schema.sourcePath} and ${existingDefExport}`,
+          `Duplicate def export "${def.zodExport}" in ${schema.sourcePath} and ${existingDefExport}`,
         );
       }
-      exportNames.set(def.schemaExport, schema.sourcePath);
+      exportNames.set(def.zodExport, schema.sourcePath);
     }
   }
+}
+
+async function loadCompileHelperSource(): Promise<string> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(here, "runtime/compile-json-schema.ts"),
+    join(here, "../src/runtime/compile-json-schema.ts"),
+    join(here, "../runtime/compile-json-schema.ts"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      return await readFile(candidate, "utf8");
+    } catch {
+      // try next
+    }
+  }
+
+  throw new Error(
+    "Could not locate runtime/compile-json-schema.ts to emit _compile.ts",
+  );
 }
 
 export async function generateSchemas(
   options: GenerateOptions = {},
 ): Promise<ZodforgeManifest> {
   const cwd = options.cwd ?? process.cwd();
-  const schemasDir = resolve(cwd, options.schemasDir ?? DEFAULT_SCHEMAS_DIR);
   const outputDir = resolve(cwd, options.outputDir ?? DEFAULT_OUTPUT_DIR);
   const cleanBeforeGenerate = options.cleanBeforeGenerate ?? true;
 
@@ -165,32 +219,54 @@ export async function generateSchemas(
     pathPrefix: options.pathPrefix,
   });
 
-  const compiledSchemas: CompiledSchema[] = [];
+  const loaded = await loadSchemas({
+    files: resolvedFiles.map((file) => ({
+      absolutePath: file.absolutePath,
+      pathId: file.pathId,
+      stem: file.stem,
+    })),
+  });
 
-  for (const file of resolvedFiles) {
-    const compiled = await compileSchemaFile(file.absolutePath, {
-      schemasDir,
-      pathPrefix: options.pathPrefix,
-      register: false,
-    });
-    compiledSchemas.push(compiled);
-  }
+  const compiledSchemas = compileLoadedSchemas(loaded, {
+    naming: options.naming,
+    register: false,
+  });
 
   assertUniqueIdentifiers(compiledSchemas);
 
   const generatedFiles: string[] = [];
 
+  const needsCompileHelper = compiledSchemas.some(
+    (schema) => schema.hasExternalRefs,
+  );
+  if (needsCompileHelper) {
+    const helperSource = await loadCompileHelperSource();
+    const compileRelativePath = "_compile.ts";
+    await writeGeneratedFile(
+      join(outputDir, compileRelativePath),
+      renderCompileHelperFile(helperSource),
+    );
+    generatedFiles.push(compileRelativePath);
+  }
+
   for (const compiled of compiledSchemas) {
-    const outputAbsolutePath = join(outputDir, compiled.outputRelativePath);
+    const rawOutputAbsolutePath = join(outputDir, compiled.rawOutputRelativePath);
     const jsonImportPath = computeJsonImportPath(
-      outputAbsolutePath,
+      rawOutputAbsolutePath,
       compiled.sourcePath,
     );
     await writeGeneratedFile(
-      outputAbsolutePath,
-      renderSchemaFile(compiled, jsonImportPath),
+      rawOutputAbsolutePath,
+      renderRawFile(compiled, jsonImportPath),
     );
-    generatedFiles.push(compiled.outputRelativePath);
+    generatedFiles.push(compiled.rawOutputRelativePath);
+
+    const zodOutputAbsolutePath = join(outputDir, compiled.zodOutputRelativePath);
+    await writeGeneratedFile(
+      zodOutputAbsolutePath,
+      renderZodFile(compiled),
+    );
+    generatedFiles.push(compiled.zodOutputRelativePath);
   }
 
   const directories = sortDirectoriesBottomUp(
@@ -207,12 +283,19 @@ export async function generateSchemas(
     generatedFiles.push(barrelRelativePath);
   }
 
-  const lookupRelativePath = "_lookup.ts";
+  const zodLookupRelativePath = "_lookup.zod.ts";
   await writeGeneratedFile(
-    join(outputDir, lookupRelativePath),
-    renderLookupFile(buildLookupEntries(compiledSchemas)),
+    join(outputDir, zodLookupRelativePath),
+    renderZodLookupFile(buildZodLookupEntries(compiledSchemas)),
   );
-  generatedFiles.push(lookupRelativePath);
+  generatedFiles.push(zodLookupRelativePath);
+
+  const rawLookupRelativePath = "_lookup.raw.ts";
+  await writeGeneratedFile(
+    join(outputDir, rawLookupRelativePath),
+    renderRawLookupFile(buildRawLookupEntries(compiledSchemas)),
+  );
+  generatedFiles.push(rawLookupRelativePath);
 
   const topLevelEntries = getBarrelExportEntries("", compiledSchemas);
   const rootIndexRelativePath = "index.ts";

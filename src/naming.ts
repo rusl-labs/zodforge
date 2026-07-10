@@ -1,5 +1,9 @@
 import { basename } from "node:path";
 
+export type NamingMode = "full" | "short";
+
+export const DEFAULT_NAMING_MODE: NamingMode = "full";
+
 export function stemFromFilename(filename: string): string {
   return basename(filename).split(".")[0] ?? basename(filename);
 }
@@ -29,35 +33,48 @@ function toPascalCase(value: string): string {
   return camel.charAt(0).toUpperCase() + camel.slice(1);
 }
 
-export function schemaExportName(stem: string, suffix = "Schema"): string {
-  return `${toCamelCase(stem)}${suffix}`;
+export function nameBase(
+  pathId: string,
+  stem: string,
+  mode: NamingMode = DEFAULT_NAMING_MODE,
+): string {
+  return mode === "full" ? pathId : stem;
 }
 
-export function typeExportName(stem: string): string {
-  return toPascalCase(stem);
+export function rawExportName(base: string): string {
+  return `${toCamelCase(base)}Raw`;
 }
 
-export function typeInputExportName(stem: string): string {
-  return `${toPascalCase(stem)}Input`;
+export function rawTypeExportName(base: string): string {
+  return `${toPascalCase(base)}Raw`;
+}
+
+export function zodExportName(base: string): string {
+  return `z${toPascalCase(base)}`;
+}
+
+export function typeExportName(base: string): string {
+  return toPascalCase(base);
+}
+
+export function typeInputExportName(base: string): string {
+  return `${toPascalCase(base)}Input`;
 }
 
 export function jsonImportVarName(stem: string): string {
   return `${toCamelCase(stem)}Json`;
 }
 
-export function defSchemaExportName(schemaStem: string, defKey: string): string {
-  return `${toCamelCase(schemaStem)}Def${toPascalCase(defKey)}Schema`;
+export function zodDefExportName(base: string, defKey: string): string {
+  return `z${toPascalCase(base)}Def${toPascalCase(defKey)}`;
 }
 
-export function defTypeExportName(schemaStem: string, defKey: string): string {
-  return `${toPascalCase(schemaStem)}Def${toPascalCase(defKey)}`;
+export function defTypeExportName(base: string, defKey: string): string {
+  return `${toPascalCase(base)}Def${toPascalCase(defKey)}`;
 }
 
-export function defTypeInputExportName(
-  schemaStem: string,
-  defKey: string,
-): string {
-  return `${toPascalCase(schemaStem)}Def${toPascalCase(defKey)}Input`;
+export function defTypeInputExportName(base: string, defKey: string): string {
+  return `${toPascalCase(base)}Def${toPascalCase(defKey)}Input`;
 }
 
 export function defPathId(
@@ -74,6 +91,11 @@ export function defDocumentId(
   defsSegment: "$defs" | "definitions" = "$defs",
 ): string {
   return `${schemaId}#/${defsSegment}/${defKey}`;
+}
+
+export function rawSiblingImportPath(pathId: string): string {
+  const fileStem = pathId.split("/").pop() ?? pathId;
+  return `./${fileStem}.raw`;
 }
 
 export function isValidIdentifier(value: string): boolean {
