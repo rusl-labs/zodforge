@@ -3,7 +3,11 @@ import { join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { glob } from "tinyglobby";
 import { generateSchemas } from "./generate.js";
-import { DEFAULT_OUTPUT_DIR, MANIFEST_FILENAME } from "./types.js";
+import {
+  DEFAULT_OUTPUT_DIR,
+  DEFAULT_SCHEMAS_DIR,
+  MANIFEST_FILENAME,
+} from "./types.js";
 import type { GenerateOptions } from "./types.js";
 
 async function collectFiles(root: string): Promise<Map<string, string>> {
@@ -28,11 +32,14 @@ export async function verifyGeneratedSchemas(
 ): Promise<{ ok: true } | { ok: false; stale: string[] }> {
   const cwd = options.cwd ?? process.cwd();
   const outputDir = options.outputDir ?? DEFAULT_OUTPUT_DIR;
+  const schemasDir = options.schemasDir ?? DEFAULT_SCHEMAS_DIR;
   const tempDir = await mkdtemp(join(tmpdir(), "zodforge-verify-"));
   const tempOutput = join(tempDir, outputDir);
 
   try {
-    await cp(join(cwd, "schemas"), join(tempDir, "schemas"), { recursive: true });
+    await cp(join(cwd, schemasDir), join(tempDir, schemasDir), {
+      recursive: true,
+    });
 
     await generateSchemas({
       ...options,

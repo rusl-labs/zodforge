@@ -34,6 +34,8 @@ export interface GenerateOptions {
   outputDir?: string;
   pathPrefix?: string;
   naming?: NamingMode;
+  /** Filename suffix to strip when deriving stems. Default: `.schema.json`. */
+  suffix?: string;
   cleanBeforeGenerate?: boolean;
 }
 
@@ -49,6 +51,8 @@ export interface ForgeOptions {
   schemasDir?: string;
   pathPrefix?: string;
   naming?: NamingMode;
+  /** Filename suffix to strip when deriving stems. Default: `.schema.json`. */
+  suffix?: string;
   register?: boolean;
 }
 
