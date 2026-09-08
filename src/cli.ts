@@ -1,6 +1,10 @@
 import { cleanGeneratedSchemas } from "./clean.js";
 import { generateSchemas } from "./generate.js";
-import { DEFAULT_NAMING_MODE, type NamingMode } from "./naming.js";
+import {
+  DEFAULT_NAMING_MODE,
+  DEFAULT_SCHEMA_SUFFIX,
+  type NamingMode,
+} from "./naming.js";
 import {
   DEFAULT_OUTPUT_DIR,
   DEFAULT_SCHEMA_GLOB,
@@ -14,6 +18,7 @@ interface ParsedArgs {
   schemasDir?: string;
   pathPrefix?: string;
   naming?: NamingMode;
+  suffix?: string;
   cwd?: string;
   help?: boolean;
 }
@@ -31,6 +36,7 @@ Generate options:
   --schemas-dir <dir>      Schemas root (default: ${DEFAULT_SCHEMAS_DIR})
   --path-prefix <prefix>   Strip prefix from pathId values
   --naming <mode>          Export naming mode: full (default) | short
+  --suffix <suffix>        Filename suffix to strip (default: ${DEFAULT_SCHEMA_SUFFIX})
   --cwd <dir>              Working directory (default: process.cwd())
 
 Clean options:
@@ -84,6 +90,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--naming":
         parsed.naming = parseNamingMode(args.shift() ?? "");
         break;
+      case "--suffix":
+        parsed.suffix = args.shift();
+        break;
       case "--cwd":
         parsed.cwd = args.shift();
         break;
@@ -113,6 +122,7 @@ async function main(): Promise<void> {
         outputDir: parsed.outputDir,
         pathPrefix: parsed.pathPrefix,
         naming: parsed.naming ?? DEFAULT_NAMING_MODE,
+        suffix: parsed.suffix,
       });
       console.log(
         `Generated ${manifest.files.length} files in ${manifest.outputDir}`,

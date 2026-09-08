@@ -3,72 +3,10 @@ import { compileLoadedSchemas, loadSchemas } from "./compile.js";
 import { resolveSchemaFiles } from "./resolve.js";
 import {
   DEFAULT_SCHEMAS_DIR,
-  type CompiledSchema,
   type ForgeOptions,
   type ForgeResult,
 } from "./types.js";
-
-function assertUniqueIdentifiers(schemas: CompiledSchema[]): void {
-  const ids = new Map<string, string>();
-  const paths = new Map<string, string>();
-  const exportNames = new Map<string, string>();
-
-  for (const schema of schemas) {
-    if (schema.id) {
-      const existing = ids.get(schema.id);
-      if (existing) {
-        throw new Error(
-          `Duplicate $id "${schema.id}" in ${schema.sourcePath} and ${existing}`,
-        );
-      }
-      ids.set(schema.id, schema.sourcePath);
-    }
-
-    const existingPath = paths.get(schema.pathId);
-    if (existingPath) {
-      throw new Error(
-        `Duplicate pathId "${schema.pathId}" in ${schema.sourcePath} and ${existingPath}`,
-      );
-    }
-    paths.set(schema.pathId, schema.sourcePath);
-
-    const existingRawExport = exportNames.get(schema.rawExport);
-    if (existingRawExport) {
-      throw new Error(
-        `Duplicate export "${schema.rawExport}" in ${schema.sourcePath} and ${existingRawExport}`,
-      );
-    }
-    exportNames.set(schema.rawExport, schema.sourcePath);
-
-    if (!schema.isDefsOnly) {
-      const existingZodExport = exportNames.get(schema.zodExport);
-      if (existingZodExport) {
-        throw new Error(
-          `Duplicate export "${schema.zodExport}" in ${schema.sourcePath} and ${existingZodExport}`,
-        );
-      }
-      exportNames.set(schema.zodExport, schema.sourcePath);
-    }
-
-    for (const def of schema.defs) {
-      const existingDefPath = paths.get(def.pathId);
-      if (existingDefPath) {
-        throw new Error(
-          `Duplicate def pathId "${def.pathId}" in ${schema.sourcePath} and ${existingDefPath}`,
-        );
-      }
-      paths.set(def.pathId, schema.sourcePath);
-
-      const existingDefExport = exportNames.get(def.zodExport);
-      if (existingDefExport) {
-        throw new Error(
-          `Duplicate def export "${def.zodExport}" in ${schema.sourcePath} and ${existingDefExport}`,
-        );
-      }
-      exportNames.set(def.zodExport, schema.sourcePath);
-    }
-  }
-}
+import { assertUniqueIdentifiers } from "./unique.js";
 
 export async function forgeSchemas(
   options: ForgeOptions = {},
@@ -80,6 +18,7 @@ export async function forgeSchemas(
     cwd,
     schemasDir: options.schemasDir,
     pathPrefix: options.pathPrefix,
+    suffix: options.suffix,
   });
 
   const loaded = await loadSchemas({ files: resolvedFiles });

@@ -37,6 +37,7 @@ import type {
   ExternalZodDep,
   JsonSchemaDocument,
 } from "./types.js";
+import { indexByUniquePathId } from "./unique.js";
 
 export { hasRootValidator, isDefsOnlyDocument } from "./compile-helpers.js";
 
@@ -44,6 +45,7 @@ export interface CompileOptions {
   schemasDir: string;
   pathPrefix?: string;
   naming?: NamingMode;
+  suffix?: string;
   register?: boolean;
 }
 
@@ -104,7 +106,7 @@ export function compileLoadedSchemas(
   const register = options.register !== false;
   const registry = buildDocumentRegistry(loaded);
   const catalog = buildExportCatalog(loaded, naming);
-  const byPathId = new Map(loaded.map((entry) => [entry.pathId, entry]));
+  const byPathId = indexByUniquePathId(loaded);
 
   const cache = new Map<string, CompiledSchema>();
   const inProgress = new Set<string>();
@@ -275,14 +277,16 @@ export function compileSchemaFromJson(
     schemasDir: string;
     pathPrefix?: string;
     naming?: NamingMode;
+    suffix?: string;
     register?: boolean;
   },
 ): CompiledSchema {
-  const stem = stemFromFilename(metadata.absolutePath);
+  const stem = stemFromFilename(metadata.absolutePath, metadata.suffix);
   const pathId = computePathId(
     metadata.absolutePath,
     metadata.schemasDir,
     metadata.pathPrefix,
+    metadata.suffix,
   );
 
   const [compiled] = compileLoadedSchemas(
@@ -316,6 +320,7 @@ export async function compileSchemaFile(
     schemasDir: options.schemasDir,
     pathPrefix: options.pathPrefix,
     naming: options.naming,
+    suffix: options.suffix,
     register: options.register,
   });
 }

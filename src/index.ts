@@ -20,6 +20,7 @@ export {
 export { verifyGeneratedSchemas } from "./verify.js";
 export {
   DEFAULT_NAMING_MODE,
+  DEFAULT_SCHEMA_SUFFIX,
   nameBase,
   rawExportName,
   rawTypeExportName,

@@ -3,9 +3,35 @@ import { basename } from "node:path";
 export type NamingMode = "full" | "short";
 
 export const DEFAULT_NAMING_MODE: NamingMode = "full";
+export const DEFAULT_SCHEMA_SUFFIX = ".schema.json";
+const FALLBACK_SCHEMA_SUFFIX = ".json";
 
-export function stemFromFilename(filename: string): string {
-  return basename(filename).split(".")[0] ?? basename(filename);
+function normalizeSchemaSuffix(suffix: string): string {
+  return suffix.startsWith(".") ? suffix : `.${suffix}`;
+}
+
+/**
+ * Strip a known schema suffix and keep the rest of the basename, dots included.
+ * Preferred suffix (default `.schema.json`) is checked first, then `.json`.
+ */
+export function stemFromFilename(
+  filename: string,
+  suffix: string = DEFAULT_SCHEMA_SUFFIX,
+): string {
+  const base = basename(filename);
+  const preferred = normalizeSchemaSuffix(suffix);
+  const suffixes =
+    preferred === FALLBACK_SCHEMA_SUFFIX
+      ? [preferred]
+      : [preferred, FALLBACK_SCHEMA_SUFFIX];
+
+  for (const candidate of suffixes) {
+    if (base.endsWith(candidate)) {
+      return base.slice(0, -candidate.length);
+    }
+  }
+
+  return base;
 }
 
 function splitIdentifierParts(value: string): string[] {

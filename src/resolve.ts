@@ -7,17 +7,18 @@ import {
   type ResolvedSchemaFile,
 } from "./types.js";
 import { stemFromFilename } from "./naming.js";
+import { assertUniqueResolvedFiles } from "./unique.js";
 
-export function computePathId(
+function toResolvedSchemaFile(
   absolutePath: string,
   schemasDir: string,
   pathPrefix?: string,
-): string {
+  suffix?: string,
+): ResolvedSchemaFile {
   const relativePath = relative(schemasDir, absolutePath).replace(/\\/g, "/");
-  const stem = stemFromFilename(absolutePath);
+  const stem = stemFromFilename(absolutePath, suffix);
   const parentDir = dirname(relativePath).replace(/\\/g, "/");
-  let pathId =
-    parentDir === "." ? stem : `${parentDir}/${stem}`.replace(/\\/g, "/");
+  let pathId = parentDir === "." ? stem : `${parentDir}/${stem}`;
 
   if (pathPrefix) {
     const normalizedPrefix = pathPrefix.replace(/\\/g, "/").replace(/\/$/, "");
@@ -28,7 +29,17 @@ export function computePathId(
     }
   }
 
-  return pathId;
+  return { absolutePath, pathId, stem, relativePath };
+}
+
+export function computePathId(
+  absolutePath: string,
+  schemasDir: string,
+  pathPrefix?: string,
+  suffix?: string,
+): string {
+  return toResolvedSchemaFile(absolutePath, schemasDir, pathPrefix, suffix)
+    .pathId;
 }
 
 export function computeOutputRelativePath(
@@ -43,6 +54,7 @@ export async function resolveSchemaFiles(options: {
   cwd?: string;
   schemasDir?: string;
   pathPrefix?: string;
+  suffix?: string;
 }): Promise<ResolvedSchemaFile[]> {
   const cwd = options.cwd ?? process.cwd();
   const schemasDir = resolve(cwd, options.schemasDir ?? DEFAULT_SCHEMAS_DIR);
@@ -54,18 +66,21 @@ export async function resolveSchemaFiles(options: {
     onlyFiles: true,
   });
 
-  return files
-    .map((absolutePath) => {
-      const stem = stemFromFilename(absolutePath);
-      const pathId = computePathId(absolutePath, schemasDir, options.pathPrefix);
-      const relativePath = relative(schemasDir, absolutePath).replace(/\\/g, "/");
-
-      return {
+  const resolved = files
+    .map((absolutePath) =>
+      toResolvedSchemaFile(
         absolutePath,
-        pathId,
-        stem,
-        relativePath,
-      };
-    })
-    .sort((left, right) => left.pathId.localeCompare(right.pathId));
+        schemasDir,
+        options.pathPrefix,
+        options.suffix,
+      ),
+    )
+    .sort(
+      (left, right) =>
+        left.pathId.localeCompare(right.pathId) ||
+        left.relativePath.localeCompare(right.relativePath),
+    );
+
+  assertUniqueResolvedFiles(resolved);
+  return resolved;
 }

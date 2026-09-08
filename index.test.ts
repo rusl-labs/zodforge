@@ -36,9 +36,40 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 describe("naming", () => {
-  test("stemFromFilename strips suffix segments", () => {
+  test("stemFromFilename strips only a known suffix and keeps dots", () => {
+    expect(stemFromFilename("gui.charts.atoms.schema.json")).toBe(
+      "gui.charts.atoms",
+    );
+    expect(stemFromFilename("thing.schema.json")).toBe("thing");
+    expect(stemFromFilename("profile.json")).toBe("profile");
+    expect(stemFromFilename("v2.thing.schema.json")).toBe("v2.thing");
     expect(stemFromFilename("trust-signal.schema.json")).toBe("trust-signal");
     expect(stemFromFilename("baz.schema.json")).toBe("baz");
+  });
+
+  test("stemFromFilename honors a custom suffix before the .json fallback", () => {
+    expect(stemFromFilename("gui.charts.atoms.schema.json", ".json")).toBe(
+      "gui.charts.atoms.schema",
+    );
+    expect(stemFromFilename("profile.json", ".schema.json")).toBe("profile");
+  });
+
+  test("dotted packaged stems become word boundaries in export names", () => {
+    const full = nameBase(
+      "foundation/gui.charts.atoms",
+      "gui.charts.atoms",
+      "full",
+    );
+    expect(zodExportName(full)).toBe("zFoundationGuiChartsAtoms");
+    expect(typeExportName(full)).toBe("FoundationGuiChartsAtoms");
+
+    const short = nameBase(
+      "foundation/gui.charts.atoms",
+      "gui.charts.atoms",
+      "short",
+    );
+    expect(zodExportName(short)).toBe("zGuiChartsAtoms");
+    expect(typeExportName(short)).toBe("GuiChartsAtoms");
   });
 
   test("full mode export names use pathId", () => {
@@ -93,6 +124,12 @@ describe("resolve", () => {
     expect(
       computePathId(join(schemasDir, "foo/baz.schema.json"), schemasDir),
     ).toBe("foo/baz");
+    expect(
+      computePathId(
+        join(schemasDir, "foundation/gui.charts.atoms.schema.json"),
+        schemasDir,
+      ),
+    ).toBe("foundation/gui.charts.atoms");
   });
 });
 
@@ -189,13 +226,63 @@ describe("forgeSchemas", () => {
       }),
     );
 
-    await expect(
-      forgeSchemas({
+    let thrown: unknown;
+    try {
+      await forgeSchemas({
         cwd: tempDir,
         schemasDir: "./schemas",
         path: "./schemas/**/*.json",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toContain('Duplicate $id "https://example.com/dup"');
+    expect(message).toContain("from ");
+    expect(message).toContain("a.json");
+    expect(message).toContain("nested/b.json");
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  test("stem collision names the colliding key and both files", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "zodforge-stem-"));
+    const schemasDir = join(tempDir, "schemas/foundation");
+    await Bun.write(
+      join(schemasDir, "gui.json"),
+      JSON.stringify({
+        $id: "https://example.com/gui-json",
+        type: "object",
       }),
-    ).rejects.toThrow(/Duplicate \$id/);
+    );
+    await Bun.write(
+      join(schemasDir, "gui.schema.json"),
+      JSON.stringify({
+        $id: "https://example.com/gui-schema",
+        type: "object",
+      }),
+    );
+
+    let thrown: unknown;
+    try {
+      await forgeSchemas({
+        cwd: tempDir,
+        schemasDir: "./schemas",
+        path: "./schemas/**/*.json",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toContain('stem "gui"');
+    expect(message).toContain("foundation/gui.json");
+    expect(message).toContain("foundation/gui.schema.json");
+    expect(message).not.toMatch(/Duplicate \$id/);
+    expect(message.match(/foundation\/gui\.json/g)?.length).toBe(1);
 
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -417,6 +504,133 @@ describe("generateSchemas", () => {
 
     expect(result.removed).toEqual([]);
     expect(result.warned).toContain("No manifest found");
+  });
+});
+
+const packagedLeaves = ["atoms", "chart", "stats", "table", "card"] as const;
+
+async function writePackagedGuiCharts(
+  root: string,
+  options: { refChartToAtoms?: boolean } = {},
+): Promise<void> {
+  for (const leaf of packagedLeaves) {
+    const id = `https://resources.rusl.com/resources/foundation/schemas/gui.charts.${leaf}`;
+    const document: Record<string, unknown> = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      $id: id,
+      type: "object",
+    };
+    if (options.refChartToAtoms && leaf === "chart") {
+      document.properties = {
+        atom: {
+          $ref: "https://resources.rusl.com/resources/foundation/gui.charts.atoms",
+        },
+      };
+    }
+    await Bun.write(
+      join(root, `gui.charts.${leaf}.schema.json`),
+      `${JSON.stringify(document)}\n`,
+    );
+  }
+}
+
+describe("packaged Rusl dotted stems", () => {
+  test("generate emits one raw and zod module per packaged leaf", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "zodforge-packaged-"));
+    const registryDir = join(tempDir, "registry/foundation");
+    await writePackagedGuiCharts(registryDir);
+
+    const manifest = await generateSchemas({
+      cwd: tempDir,
+      path: "./registry/**/*.json",
+      schemasDir: "./registry",
+      outputDir: "./src",
+    });
+
+    const generatedRoot = join(tempDir, "src");
+    for (const leaf of packagedLeaves) {
+      const stem = `gui.charts.${leaf}`;
+      expect(await pathExists(join(generatedRoot, `foundation/${stem}.raw.ts`))).toBe(
+        true,
+      );
+      expect(await pathExists(join(generatedRoot, `foundation/${stem}.zod.ts`))).toBe(
+        true,
+      );
+    }
+
+    const atomsZod = await readFile(
+      join(generatedRoot, "foundation/gui.charts.atoms.zod.ts"),
+      "utf8",
+    );
+    expect(atomsZod).toContain("export const zFoundationGuiChartsAtoms");
+    expect(atomsZod).toContain("export type FoundationGuiChartsAtoms");
+    expect(atomsZod).toContain('pathId: "foundation/gui.charts.atoms"');
+
+    const shortDir = join(tempDir, "src-short");
+    await generateSchemas({
+      cwd: tempDir,
+      path: "./registry/**/*.json",
+      schemasDir: "./registry",
+      outputDir: "./src-short",
+      naming: "short",
+    });
+    const shortAtoms = await readFile(
+      join(shortDir, "foundation/gui.charts.atoms.zod.ts"),
+      "utf8",
+    );
+    expect(shortAtoms).toContain("export const zGuiChartsAtoms");
+
+    const lookup = await readFile(join(generatedRoot, "_lookup.zod.ts"), "utf8");
+    expect(lookup).toContain('"foundation/gui.charts.atoms"');
+    expect(lookup).toContain('"foundation/gui.charts.chart"');
+    expect(lookup).toContain('"foundation/gui.charts.stats"');
+    expect(lookup).toContain('"foundation/gui.charts.table"');
+    expect(lookup).toContain('"foundation/gui.charts.card"');
+
+    const rawLookup = await readFile(
+      join(generatedRoot, "_lookup.raw.ts"),
+      "utf8",
+    );
+    expect(rawLookup).toContain('"foundation/gui.charts.atoms"');
+
+    const packagedModules = manifest.files.filter((file) =>
+      /gui\.charts\.(atoms|chart|stats|table|card)\.(raw|zod)\.ts$/.test(file),
+    );
+    expect(packagedModules).toHaveLength(10);
+
+    const verified = await verifyGeneratedSchemas({
+      cwd: tempDir,
+      path: "./registry/**/*.json",
+      schemasDir: "./registry",
+      outputDir: "./src",
+    });
+    expect(verified.ok).toBe(true);
+
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  test("cross-file $ref between packaged schemas wires to an import", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "zodforge-packaged-ref-"));
+    await writePackagedGuiCharts(join(tempDir, "registry/foundation"), {
+      refChartToAtoms: true,
+    });
+
+    await generateSchemas({
+      cwd: tempDir,
+      path: "./registry/**/*.json",
+      schemasDir: "./registry",
+      outputDir: "./src",
+    });
+
+    const chartZod = await readFile(
+      join(tempDir, "src/foundation/gui.charts.chart.zod.ts"),
+      "utf8",
+    );
+    expect(chartZod).toContain('from "./gui.charts.atoms.zod"');
+    expect(chartZod).toContain("zFoundationGuiChartsAtoms");
+    expect(chartZod).toContain("compileJsonSchema");
+
+    await rm(tempDir, { recursive: true, force: true });
   });
 });
 
