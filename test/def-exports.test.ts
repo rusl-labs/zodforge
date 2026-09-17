@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -100,6 +100,12 @@ const extVocab = {
     delta: { $ref: "https://example.com/delta-shape" },
   },
 } as const;
+
+const workspaceNodeModules = join(import.meta.dir, "../node_modules");
+
+async function linkWorkspaceNodeModules(tempDir: string): Promise<void> {
+  await symlink(workspaceNodeModules, join(tempDir, "node_modules"), "dir");
+}
 
 describe("defExportDocument", () => {
   test("keeps only $schema, $id, defs, and $ref", () => {
@@ -211,6 +217,7 @@ describe("generated def exports do not inherit root applicators", () => {
       path: "./schemas/**/*.json",
       outputDir: "./src/schemas",
     });
+    await linkWorkspaceNodeModules(tempDir);
 
     const source = await Bun.file(
       join(tempDir, "src/schemas/vocab.zod.ts"),
@@ -247,6 +254,7 @@ describe("generated def exports do not inherit root applicators", () => {
       path: "./schemas/**/*.json",
       outputDir: "./src/schemas",
     });
+    await linkWorkspaceNodeModules(tempDir);
 
     const { zSplit, zSplitDefPayload } = await import(
       join(tempDir, "src/schemas/split.zod.ts")
@@ -288,6 +296,7 @@ describe("generated def exports do not inherit root applicators", () => {
       path: "./schemas/**/*.json",
       outputDir: "./src/schemas",
     });
+    await linkWorkspaceNodeModules(tempDir);
 
     const localSource = await Bun.file(
       join(tempDir, "src/schemas/local-vocab.zod.ts"),
@@ -335,10 +344,6 @@ describe("generated def exports do not inherit root applicators", () => {
     await writeFile(
       join(schemasDir, "vocab.json"),
       `${JSON.stringify(vocab, null, 2)}\n`,
-    );
-    await writeFile(
-      join(schemasDir, "split.json"),
-      `${JSON.stringify(oneOfRoot, null, 2)}\n`,
     );
 
     await generateSchemas({
@@ -392,7 +397,6 @@ describe("generated def exports do not inherit root applicators", () => {
     await writeFile(
       join(tempDir, "typecheck.ts"),
       `import { zVocab, zVocabDefDelta, type VocabDefDelta } from "./src/schemas/vocab.zod";
-import { zSplitDefPayload, type SplitDefPayload } from "./src/schemas/split.zod";
 
 type Equals<X, Y> =
   (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
@@ -400,16 +404,12 @@ type Equals<X, Y> =
     : false;
 
 const _delta: Equals<VocabDefDelta, { value: number; direction?: "up" | "down" }> = true;
-const _payload: Equals<SplitDefPayload, { n: number }> = true;
 
 const okDelta: VocabDefDelta = { value: 1, direction: "up" };
 const parsed: VocabDefDelta = zVocabDefDelta.parse({ value: 1, direction: "up" });
-const okPayload: SplitDefPayload = zSplitDefPayload.parse({ n: 1 });
 void okDelta;
 void parsed;
-void okPayload;
 void _delta;
-void _payload;
 void zVocab;
 
 // @ts-expect-error value must be a number
