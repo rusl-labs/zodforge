@@ -145,6 +145,7 @@ function formatObject(fields: string[]): string {
 function objectToTs(
   node: Record<string, unknown>,
   options: JsonSchemaToTsOptions,
+  closedSibling: boolean,
 ): string {
   const properties = isPlainObject(node.properties) ? node.properties : {};
   const required = new Set(requiredKeys(node));
@@ -173,6 +174,12 @@ function objectToTs(
       return "Record<string, never>";
     }
     return formatObject(fields);
+  }
+
+  // Applicator branches constrain the same object as their closed sibling.
+  // Property/item recursion starts fresh, so nested open objects stay open.
+  if (closedSibling && (additional === undefined || additional === true)) {
+    return fields.length === 0 ? "unknown" : formatObject(fields);
   }
 
   if (fields.length === 0) {
@@ -234,6 +241,7 @@ function arrayToTs(
 function schemaWithoutApplicatorsToTs(
   node: Record<string, unknown>,
   options: JsonSchemaToTsOptions,
+  closedSibling: boolean,
 ): string {
   if (node.const !== undefined) {
     return constToTs(node.const);
@@ -247,7 +255,7 @@ function schemaWithoutApplicatorsToTs(
   if (types.length > 1) {
     return joinUnion(
       types.map((typeName) =>
-        schemaWithoutApplicatorsToTs({ ...node, type: typeName }, options),
+        schemaWithoutApplicatorsToTs({ ...node, type: typeName }, options, closedSibling),
       ),
     );
   }
@@ -274,7 +282,7 @@ function schemaWithoutApplicatorsToTs(
     node.required !== undefined ||
     node.patternProperties !== undefined
   ) {
-    return objectToTs(node, options);
+    return objectToTs(node, options, closedSibling);
   }
 
   if (
@@ -300,6 +308,14 @@ export function jsonSchemaToTs(
   node: unknown,
   options: JsonSchemaToTsOptions,
 ): string {
+  return schemaToTs(node, options, false);
+}
+
+function schemaToTs(
+  node: unknown,
+  options: JsonSchemaToTsOptions,
+  closedSibling: boolean,
+): string {
   if (typeof node === "boolean") {
     return node ? "unknown" : "never";
   }
@@ -311,20 +327,21 @@ export function jsonSchemaToTs(
     return options.resolveRef(node.$ref);
   }
 
+  const closed = closedSibling || node.additionalProperties === false;
   const applicatorParts: string[] = [];
   if (Array.isArray(node.oneOf) && node.oneOf.length > 0) {
     applicatorParts.push(
-      joinUnion(node.oneOf.map((item) => jsonSchemaToTs(item, options))),
+      joinUnion(node.oneOf.map((item) => schemaToTs(item, options, closed))),
     );
   }
   if (Array.isArray(node.anyOf) && node.anyOf.length > 0) {
     applicatorParts.push(
-      joinUnion(node.anyOf.map((item) => jsonSchemaToTs(item, options))),
+      joinUnion(node.anyOf.map((item) => schemaToTs(item, options, closed))),
     );
   }
   if (Array.isArray(node.allOf) && node.allOf.length > 0) {
     applicatorParts.push(
-      joinIntersection(node.allOf.map((item) => jsonSchemaToTs(item, options))),
+      joinIntersection(node.allOf.map((item) => schemaToTs(item, options, closed))),
     );
   }
 
@@ -379,7 +396,7 @@ export function jsonSchemaToTs(
   }
 
   const sibling = hasRestConstraints
-    ? schemaWithoutApplicatorsToTs(rest, options)
+    ? schemaWithoutApplicatorsToTs(rest, options, closedSibling)
     : undefined;
 
   const parts = [sibling, ...applicatorParts].filter(

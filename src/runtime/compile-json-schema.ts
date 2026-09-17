@@ -511,7 +511,33 @@ export function compileJsonSchema(
       if (!hasSiblingConstraints(node)) {
         return applicator;
       }
-      return z.intersection(compileWithoutApplicators(node), applicator);
+      const combined = z.intersection(compileWithoutApplicators(node), applicator);
+      if (node.additionalProperties === false) {
+        const properties = isPlainObject(node.properties) ? node.properties : {};
+        const patterns = isPlainObject(node.patternProperties)
+          ? Object.keys(node.patternProperties).map((pattern) => new RegExp(pattern))
+          : [];
+        // Zod intersections can discard a strict sibling's unknown-key errors.
+        // Enforce the JSON Schema boundary on the input, before merging outputs.
+        return z.unknown().superRefine((value, ctx) => {
+          if (!isPlainObject(value)) {
+            return;
+          }
+          for (const key of Object.keys(value)) {
+            if (
+              !Object.hasOwn(properties, key) &&
+              !patterns.some((pattern) => pattern.test(key))
+            ) {
+              ctx.addIssue({
+                code: "custom",
+                path: [key],
+                message: "Additional properties are not allowed",
+              });
+            }
+          }
+        }).pipe(combined);
+      }
+      return combined;
     }
 
     const types = Array.isArray(node.type)

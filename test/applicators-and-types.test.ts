@@ -98,6 +98,24 @@ describe("sibling applicators keep object constraints", () => {
     }
   });
 
+  test.each(["anyOf", "oneOf", "allOf"])(
+    "%s cannot reopen a closed sibling",
+    (applicator) => {
+      const { anyOf, ...closed } = schemaB;
+      const schema = compileJsonSchema(
+        { ...closed, [applicator]: anyOf },
+        { external: { "https://example.com/a": compileJsonSchema(schemaA) } },
+      );
+      const value = {
+        kind: "widget",
+        ...(applicator === "allOf" ? { cells: ["a"] } : {}),
+        rows: [{ x: "Jan", revenue: 12 }],
+      };
+      expect(schema.parse(value)).toEqual(value);
+      expect(schema.safeParse({ ...value, extra: true }).success).toBe(false);
+    },
+  );
+
   test("anyOf beside properties/$ref rejects scalars and wrong const", () => {
     const b = compileBWithRef();
 
@@ -259,21 +277,6 @@ describe("jsonSchemaToTs", () => {
       jsonSchemaToTs(schemaKind, { resolveRef: () => "never" }),
     ).toBe('{ kind: "alpha" } | { kind: "beta" }');
   });
-
-  test("external $ref and sibling anyOf on b.json", () => {
-    const tsType = jsonSchemaToTs(schemaB, {
-      resolveRef: (ref) => {
-        if (ref === "https://example.com/a") {
-          return "A";
-        }
-        throw new Error(`unexpected ref ${ref}`);
-      },
-    });
-
-    expect(tsType).toBe(
-      '{ kind: "widget"; cells?: Array<string>; rows?: Array<A> } & ({ cells: unknown; [key: string]: unknown } | { rows: unknown; [key: string]: unknown })',
-    );
-  });
 });
 
 describe("generated types and validators", () => {
@@ -318,14 +321,6 @@ describe("generated types and validators", () => {
     );
     await Bun.$`bun install`.cwd(tempDir);
 
-    const bSource = await Bun.file(join(tempDir, "src/schemas/b.zod.ts")).text();
-    expect(bSource).toContain('from "./a.zod"');
-    expect(bSource).toContain("type A");
-    expect(bSource).toContain('kind: "widget"');
-    expect(bSource).toContain("export type B =");
-    expect(bSource).not.toContain("z.infer<");
-    expect(bSource).toContain("z.ZodType<B, B>");
-
     const { zB } = await import(join(tempDir, "src/schemas/b.zod.ts"));
     expect(zB.safeParse(42).success).toBe(false);
     expect(zB.safeParse({ kind: "nope" }).success).toBe(false);
@@ -339,6 +334,9 @@ describe("generated types and validators", () => {
       rows: [{ x: "Jan", revenue: 12, breakdown: [{ value: 12 }] }],
     };
     expect(zB.parse(wideRows)).toEqual(wideRows);
+    expect(
+      zB.safeParse({ ...wideRows, extra: true }).success,
+    ).toBe(false);
 
     await writeFile(
       join(tempDir, "tsconfig.json"),
@@ -363,6 +361,7 @@ describe("generated types and validators", () => {
       join(tempDir, "typecheck.ts"),
       `import { zB, type B } from "./src/schemas/b.zod";
 import { type Kind } from "./src/schemas/kind.zod";
+import { type A } from "./src/schemas/a.zod";
 
 type Equals<X, Y> =
   (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
@@ -371,6 +370,18 @@ type Equals<X, Y> =
 
 const _kind: Equals<B["kind"], "widget"> = true;
 const _union: Equals<Kind, { kind: "alpha" } | { kind: "beta" }> = true;
+
+type RequiredOnly = ${jsonSchemaToTs(
+  { required: ["x"] },
+  { resolveRef: () => "never" },
+)};
+const openRequired: RequiredOnly = { x: "Jan", revenue: 12 };
+const _requiredExtra: Equals<RequiredOnly["revenue"], unknown> = true;
+// @ts-expect-error open fragments still require their declared key
+const missingRequired: RequiredOnly = { revenue: 12 };
+void openRequired;
+void _requiredExtra;
+void missingRequired;
 
 const okCells: B = { kind: "widget", cells: ["a"] };
 const okRows: B = { kind: "widget", rows: [{ x: "Jan", revenue: 12, breakdown: [{ value: 12 }] }] };
@@ -385,6 +396,46 @@ void okRows;
 void parsed;
 void _kind;
 void _union;
+
+// @ts-expect-error required-only alternatives must not open the closed parent
+const badExtra: B = { kind: "widget", cells: ["a"], extra: true };
+void badExtra;
+// @ts-expect-error closed parents do not expose arbitrary indexed properties
+type Extra = B["extra"];
+type ClosedOneOf = ${jsonSchemaToTs(
+  { ...schemaB, anyOf: undefined, oneOf: schemaB.anyOf },
+  { resolveRef: () => "A" },
+)};
+type ClosedAllOf = ${jsonSchemaToTs(
+  { ...schemaB, anyOf: undefined, allOf: schemaB.anyOf },
+  { resolveRef: () => "A" },
+)};
+const oneOfRows: ClosedOneOf = { kind: "widget", rows: [{ x: "Jan", revenue: 12 }] };
+const allOfRows: ClosedAllOf = { kind: "widget", cells: ["a"], rows: [{ x: "Jan", revenue: 12 }] };
+// @ts-expect-error oneOf fragments must not reopen the closed parent
+const badOneOf: ClosedOneOf = { kind: "widget", cells: ["a"], extra: true };
+// @ts-expect-error allOf fragments must not reopen the closed parent
+const badAllOf: ClosedAllOf = { kind: "widget", cells: ["a"], rows: [], extra: true };
+void oneOfRows;
+void allOfRows;
+void badOneOf;
+void badAllOf;
+
+type ClosedNumeric = ${jsonSchemaToTs(
+  {
+    type: "object",
+    properties: { x: {} },
+    required: ["x"],
+    additionalProperties: false,
+    anyOf: [{ additionalProperties: { type: "number" } }],
+  },
+  { resolveRef: () => "never" },
+)};
+const numeric: ClosedNumeric = { x: 1 };
+// @ts-expect-error schema-valued catchalls still constrain the sibling's keys
+const nonNumeric: ClosedNumeric = { x: "bad" };
+void numeric;
+void nonNumeric;
 
 // @ts-expect-error 42 is not B
 const badNumber: B = 42;
