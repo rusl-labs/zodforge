@@ -364,6 +364,118 @@ export function compileJsonSchema(
     return compileNode(stripApplicators(node));
   }
 
+  function compileNegation(schema: ZodType): ZodType {
+    return z.unknown().superRefine((value, ctx) => {
+      if (schema.safeParse(value).success) {
+        ctx.addIssue("Invalid input: must not match nested schema");
+      }
+    });
+  }
+
+  function compileIfThenElse(
+    ifNode: unknown,
+    thenNode: unknown,
+    elseNode: unknown,
+  ): ZodType {
+    const ifSchema = compileNode(ifNode);
+    const thenSchema = thenNode === undefined ? undefined : compileNode(thenNode);
+    const elseSchema = elseNode === undefined ? undefined : compileNode(elseNode);
+    return z.unknown().superRefine((value, ctx) => {
+      if (ifSchema.safeParse(value).success) {
+        if (!thenSchema) {
+          return;
+        }
+        const result = thenSchema.safeParse(value);
+        if (!result.success) {
+          ctx.addIssue(result.error.issues[0]?.message ?? "Invalid input");
+        }
+        return;
+      }
+      if (!elseSchema) {
+        return;
+      }
+      const result = elseSchema.safeParse(value);
+      if (!result.success) {
+        ctx.addIssue(result.error.issues[0]?.message ?? "Invalid input");
+      }
+    });
+  }
+
+  function compilePropertyNames(schema: ZodType): ZodType {
+    return z.unknown().superRefine((value, ctx) => {
+      if (!isPlainObject(value)) {
+        return;
+      }
+      for (const key of Object.keys(value)) {
+        if (!schema.safeParse(key).success) {
+          ctx.addIssue(`Invalid property name ${JSON.stringify(key)}`);
+        }
+      }
+    });
+  }
+
+  function compileDependentSchemas(
+    deps: Record<string, unknown>,
+  ): ZodType {
+    const compiled = Object.entries(deps).map(
+      ([key, schema]) => [key, compileNode(schema)] as const,
+    );
+    return z.unknown().superRefine((value, ctx) => {
+      if (!isPlainObject(value)) {
+        return;
+      }
+      for (const [key, schema] of compiled) {
+        if (!(key in value)) {
+          continue;
+        }
+        const result = schema.safeParse(value);
+        if (!result.success) {
+          ctx.addIssue(result.error.issues[0]?.message ?? "Invalid input");
+        }
+      }
+    });
+  }
+
+  /**
+   * Lift `not` / `if`/`then`/`else` / `propertyNames` / `dependentSchemas` off
+   * the node so leftover object/array/scalar constraints can compile. Those
+   * keywords are valid siblings of applicators and often hold `$ref`s.
+   */
+  function peelRefinementKeywords(node: Record<string, unknown>): {
+    rest: Record<string, unknown>;
+    extras: ZodType[];
+  } {
+    const extras: ZodType[] = [];
+    const rest = { ...node };
+
+    if (rest.not !== undefined) {
+      extras.push(compileNegation(compileNode(rest.not)));
+      delete rest.not;
+    }
+
+    if (rest.if !== undefined) {
+      extras.push(compileIfThenElse(rest.if, rest.then, rest.else));
+      delete rest.if;
+      delete rest.then;
+      delete rest.else;
+    } else {
+      delete rest.then;
+      delete rest.else;
+    }
+
+    if (rest.propertyNames !== undefined) {
+      extras.push(compilePropertyNames(compileNode(rest.propertyNames)));
+      delete rest.propertyNames;
+    }
+
+    if (isPlainObject(rest.dependentSchemas)) {
+      extras.push(compileDependentSchemas(rest.dependentSchemas));
+      delete rest.dependentSchemas;
+    }
+
+    return { rest, extras };
+  }
+
   function compileNode(node: unknown): ZodType {
     if (typeof node === "boolean") {
       return node ? z.any() : z.never();
@@ -385,6 +497,11 @@ export function compileJsonSchema(
       !hasRequiredKeysOutsideProperties(node)
     ) {
       return fromJSONSchema(asJsonSchemaInput(node));
+    }
+
+    const { rest, extras } = peelRefinementKeywords(node);
+    if (extras.length > 0) {
+      return intersectAll([compileNode(rest), ...extras]);
     }
 
     const applicator = compileApplicators(node);
@@ -424,6 +541,10 @@ export function compileJsonSchema(
         compileNode({ ...node, type: typeName }),
       );
       return z.union(variants as [ZodType, ZodType, ...ZodType[]]);
+    }
+
+    if (!containsRef(node)) {
+      return fromJSONSchema(asJsonSchemaInput(node));
     }
 
     throw new Error(

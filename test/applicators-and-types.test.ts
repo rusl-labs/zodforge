@@ -162,6 +162,62 @@ describe("sibling applicators keep object constraints", () => {
       schema.safeParse({ label: "x", extra: { n: 1 } }).success,
     ).toBe(true);
   });
+
+  test("sibling not/$ref beside an applicator compiles instead of throwing", () => {
+    const forbidden = compileJsonSchema({ const: "nope" });
+    const schema = compileJsonSchema(
+      {
+        type: "string",
+        anyOf: [{ minLength: 1 }],
+        not: { $ref: "https://example.com/forbidden" },
+      },
+      { external: { "https://example.com/forbidden": forbidden } },
+    );
+
+    expect(schema.safeParse("ok").success).toBe(true);
+    expect(schema.safeParse("nope").success).toBe(false);
+    expect(schema.safeParse(42).success).toBe(false);
+  });
+
+  test("sibling if/then with $ref beside an applicator compiles", () => {
+    const widgetIf = compileJsonSchema({
+      type: "object",
+      properties: { kind: { const: "widget" } },
+      required: ["kind"],
+    });
+    const schema = compileJsonSchema(
+      {
+        type: "object",
+        properties: {
+          kind: { type: "string" },
+          n: { type: "number" },
+        },
+        anyOf: [{ required: ["kind"] }],
+        if: { $ref: "https://example.com/widget-if" },
+        then: { required: ["n"] },
+      },
+      { external: { "https://example.com/widget-if": widgetIf } },
+    );
+
+    expect(schema.safeParse({ kind: "other" }).success).toBe(true);
+    expect(schema.safeParse({ kind: "widget" }).success).toBe(false);
+    expect(schema.safeParse({ kind: "widget", n: 1 }).success).toBe(true);
+  });
+
+  test("sibling propertyNames $ref beside an applicator compiles", () => {
+    const ident = compileJsonSchema({ type: "string", pattern: "^[a-z]+$" });
+    const schema = compileJsonSchema(
+      {
+        type: "object",
+        anyOf: [{ minProperties: 0 }],
+        propertyNames: { $ref: "https://example.com/ident" },
+      },
+      { external: { "https://example.com/ident": ident } },
+    );
+
+    expect(schema.safeParse({ abc: 1 }).success).toBe(true);
+    expect(schema.safeParse({ ABC: 1 }).success).toBe(false);
+  });
 });
 
 describe("jsonSchemaToTs", () => {
