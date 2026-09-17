@@ -304,6 +304,8 @@ export function compileJsonSchema(
       objectSchema = objectSchema.catchall(
         compileNode(node.additionalProperties),
       );
+    } else {
+      objectSchema = objectSchema.catchall(z.unknown());
     }
 
     return objectSchema;

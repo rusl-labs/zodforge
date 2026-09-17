@@ -79,6 +79,25 @@ function compileBWithRef() {
 }
 
 describe("sibling applicators keep object constraints", () => {
+  test("open objects preserve extra columns when properties contain refs", () => {
+    const x = compileJsonSchema({ type: "string" });
+    const row = { x: "Jan", revenue: 12, breakdown: [{ value: 12 }] };
+    for (const additional of [{}, { additionalProperties: true }]) {
+      const schema = compileJsonSchema(
+        {
+          type: "object",
+          properties: { x: { $ref: "https://example.com/x" } },
+          required: ["x"],
+          ...additional,
+        },
+        { external: { "https://example.com/x": x } },
+      );
+      expect(schema.parse(row)).toEqual(row);
+      expect(schema.safeParse({ revenue: 12 }).success).toBe(false);
+      expect(schema.safeParse({ x: 42, revenue: 12 }).success).toBe(false);
+    }
+  });
+
   test("anyOf beside properties/$ref rejects scalars and wrong const", () => {
     const b = compileBWithRef();
 
@@ -252,7 +271,7 @@ describe("jsonSchemaToTs", () => {
     });
 
     expect(tsType).toBe(
-      '{ kind: "widget"; cells?: Array<string>; rows?: Array<A> } & ({ cells: unknown } | { rows: unknown })',
+      '{ kind: "widget"; cells?: Array<string>; rows?: Array<A> } & ({ cells: unknown; [key: string]: unknown } | { rows: unknown; [key: string]: unknown })',
     );
   });
 });
@@ -315,6 +334,11 @@ describe("generated types and validators", () => {
     expect(
       zB.safeParse({ kind: "widget", rows: [{ x: "1" }] }).success,
     ).toBe(true);
+    const wideRows = {
+      kind: "widget",
+      rows: [{ x: "Jan", revenue: 12, breakdown: [{ value: 12 }] }],
+    };
+    expect(zB.parse(wideRows)).toEqual(wideRows);
 
     await writeFile(
       join(tempDir, "tsconfig.json"),
@@ -349,7 +373,12 @@ const _kind: Equals<B["kind"], "widget"> = true;
 const _union: Equals<Kind, { kind: "alpha" } | { kind: "beta" }> = true;
 
 const okCells: B = { kind: "widget", cells: ["a"] };
-const okRows: B = { kind: "widget", rows: [{ x: "1" }] };
+const okRows: B = { kind: "widget", rows: [{ x: "Jan", revenue: 12, breakdown: [{ value: 12 }] }] };
+type Row = NonNullable<B["rows"]>[number];
+const _dynamicColumn: Equals<Row["revenue"], unknown> = true;
+const _knownColumn: Equals<Row["x"], string | undefined> = true;
+void _dynamicColumn;
+void _knownColumn;
 const parsed: B = zB.parse({ kind: "widget", cells: ["a"] });
 void okCells;
 void okRows;

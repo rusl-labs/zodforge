@@ -182,7 +182,7 @@ function objectToTs(
     return `Record<string, ${jsonSchemaToTs(additional, options)}>`;
   }
 
-  if (additional === true) {
+  if (additional === undefined || additional === true) {
     fields.push("[key: string]: unknown");
     return formatObject(fields);
   }
