@@ -168,6 +168,8 @@ const rawByPath = getRawSchemaByIdentifier("user/profile");
 
 `UserProfile` (and `UserProfileInput`) is inferred from the JSON Schema at generate time — not from `z.infer` of an untyped `ZodType`. `const` becomes a literal, `oneOf` / `anyOf` a union, `allOf` an intersection, and `additionalProperties: false` a closed object. External `$ref`s use the target module's emitted type, the same way Zod exports are wired. The Zod export is annotated as `z.ZodType<UserProfile, UserProfile>` so `parse()` is typed too.
 
+Open objects retain additional properties in parsed values and generated types. A closed object with sibling `anyOf`, `oneOf`, or `allOf` constraints still rejects extra keys; required-only branches do not reopen its generated type. Nested open objects remain open.
+
 Generated zod files use `z.fromJSONSchema(raw)` when a schema is self-contained. When it has external `$ref`s (e.g. Rusl `https://resources.rusl.com/...#/$defs/...`), zodforge wires them to **imports of the target Zod exports** and compiles via a small `_compile.ts` helper — so `us-address` reuses `zPragmaticGeoDefPoint` instead of inlining a copy. Sibling `anyOf` / `oneOf` / `allOf` keywords are intersected with object/array/scalar constraints beside them, matching Zod's `fromJSONSchema` for ref-free trees. A `$defs` / `definitions` export is compiled from `$schema`, `$id`, the defs bag, and `$ref` only — never the root document's other keywords — so a def is not constrained by the root `anyOf` / `oneOf` / `allOf`. Referenced schemas must be in the same generate set and match by `$id` (Rusl `/schemas/` aliases included). Raw exports always keep the original `$ref` URIs.
 
 ### 6. What gets generated
