@@ -3,6 +3,7 @@ export {
   compileLoadedSchemas,
   compileSchemaFile,
   compileSchemaFromJson,
+  defExportDocument,
 } from "./compile.js";
 export { forgeSchemas } from "./forge.js";
 export { generateSchemas } from "./generate.js";

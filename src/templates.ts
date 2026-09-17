@@ -117,6 +117,30 @@ export const ${compiled.zodExport}: ${annotation} = z
   }) as ${annotation};`;
 }
 
+function renderDefExportSchemaObject(
+  compiled: CompiledSchema,
+  def: CompiledDef,
+): string {
+  const raw = compiled.rawExport;
+  const defsKey = def.refPath.startsWith("#/definitions/")
+    ? "definitions"
+    : "$defs";
+  const fields: string[] = [];
+
+  if (compiled.rawJson.$schema !== undefined) {
+    fields.push(`$schema: ${raw}.$schema`);
+  }
+  if (compiled.rawJson.$id !== undefined) {
+    fields.push(`$id: ${raw}.$id`);
+  }
+  fields.push(`${defsKey}: ${raw}.${defsKey}`);
+  fields.push(`$ref: ${JSON.stringify(def.refPath)}`);
+
+  return `{
+    ${fields.join(",\n    ")},
+  }`;
+}
+
 function renderDefZodExports(
   compiled: CompiledSchema,
   def: CompiledDef,
@@ -136,25 +160,22 @@ function renderDefZodExports(
     def.inferredType,
   );
   const annotation = `z.ZodType<${def.typeExport}, ${def.typeExport}>`;
+  const schemaObject = renderDefExportSchemaObject(compiled, def);
 
   if (compiled.hasExternalRefs) {
     return `${types}
 
 export const ${def.zodExport}: ${annotation} = compileJsonSchema(
-  {
-    ...${compiled.rawExport},
-    $ref: ${JSON.stringify(def.refPath)},
-  } as Parameters<typeof compileJsonSchema>[0],
+  ${schemaObject} as Parameters<typeof compileJsonSchema>[0],
   { external: ${renderExternalMap(compiled)} },
 )${metaSuffix} as ${annotation};`;
   }
 
   return `${types}
 
-export const ${def.zodExport}: ${annotation} = z.fromJSONSchema({
-  ...${compiled.rawExport},
-  $ref: ${JSON.stringify(def.refPath)},
-} as Parameters<typeof z.fromJSONSchema>[0])${metaSuffix} as ${annotation};`;
+export const ${def.zodExport}: ${annotation} = z.fromJSONSchema(
+  ${schemaObject} as Parameters<typeof z.fromJSONSchema>[0],
+)${metaSuffix} as ${annotation};`;
 }
 
 export function renderZodFile(compiled: CompiledSchema): string {
