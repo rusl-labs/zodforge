@@ -373,6 +373,8 @@ describe("generateSchemas", () => {
     expect(commonZod).toContain("export const zRuslCommonDefAccountSlug");
     expect(commonZod).toContain('pathId: "rusl/common#/$defs/account-slug"');
     expect(commonZod).toContain('$ref: "#/$defs/account-slug"');
+    expect(commonZod).not.toContain("...ruslCommonRaw");
+    expect(commonZod).toContain("$defs: ruslCommonRaw.$defs");
 
     const commonRaw = await readFile(
       join(generatedRoot, "rusl/common.raw.ts"),

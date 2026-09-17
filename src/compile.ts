@@ -1,6 +1,11 @@
 import { z, type ZodType } from "zod";
 import { dirname, relative } from "node:path";
-import { getDefKeys, isDefsOnlyDocument } from "./compile-helpers.js";
+import {
+  defExportDocument,
+  getDefKeys,
+  getDefsSegment,
+  isDefsOnlyDocument,
+} from "./compile-helpers.js";
 import { readJsonFile } from "./fs.js";
 import {
   DEFAULT_NAMING_MODE,
@@ -43,7 +48,11 @@ import type {
 } from "./types.js";
 import { indexByUniquePathId } from "./unique.js";
 
-export { hasRootValidator, isDefsOnlyDocument } from "./compile-helpers.js";
+export {
+  defExportDocument,
+  hasRootValidator,
+  isDefsOnlyDocument,
+} from "./compile-helpers.js";
 
 export interface CompileOptions {
   schemasDir: string;
@@ -54,16 +63,6 @@ export interface CompileOptions {
 }
 
 export interface LoadedSchema extends RegistryDocument {}
-
-function getDefsSegment(json: JsonSchemaDocument): "$defs" | "definitions" {
-  if (json.$defs) {
-    return "$defs";
-  }
-  if (json.definitions) {
-    return "definitions";
-  }
-  return "$defs";
-}
 
 function unescapeJsonPointer(segment: string): string {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
@@ -96,11 +95,10 @@ function compileDefSchema(
   defsSegment: "$defs" | "definitions",
   external: Record<string, ZodType>,
 ): ZodType {
-  const defDocument: JsonSchemaDocument = {
-    ...rawJson,
-    $ref: `#/${defsSegment}/${defKey}`,
-  };
-  return compileJsonSchema(defDocument, { external });
+  return compileJsonSchema(
+    defExportDocument(rawJson, defKey, defsSegment),
+    { external },
+  );
 }
 
 /**
