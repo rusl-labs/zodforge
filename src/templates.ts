@@ -31,18 +31,30 @@ function renderExternalImports(compiled: CompiledSchema): string {
     return "";
   }
 
-  const byModule = new Map<string, Set<string>>();
+  const byModule = new Map<
+    string,
+    { values: Set<string>; types: Set<string> }
+  >();
   for (const dep of compiled.externalDeps) {
     const importPath = zodSiblingImportPath(compiled.pathId, dep.pathId);
-    const existing = byModule.get(importPath) ?? new Set<string>();
-    existing.add(dep.zodExport);
+    const existing = byModule.get(importPath) ?? {
+      values: new Set<string>(),
+      types: new Set<string>(),
+    };
+    existing.values.add(dep.zodExport);
+    existing.types.add(dep.typeExport);
     byModule.set(importPath, existing);
   }
 
   return [...byModule.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([importPath, exports]) => {
-      const names = [...exports].sort((a, b) => a.localeCompare(b));
+    .map(([importPath, { values, types }]) => {
+      const names = [
+        ...[...values].sort((a, b) => a.localeCompare(b)),
+        ...[...types]
+          .sort((a, b) => a.localeCompare(b))
+          .map((name) => `type ${name}`),
+      ];
       return `import { ${names.join(", ")} } from "${importPath}";`;
     })
     .join("\n");
@@ -59,11 +71,28 @@ function renderExternalMap(compiled: CompiledSchema): string {
   return `{\n${entries}\n}`;
 }
 
+function renderTypeExports(
+  typeExport: string,
+  typeInputExport: string,
+  inferredType: string,
+): string {
+  return `export type ${typeExport} = ${inferredType};
+export type ${typeInputExport} = ${typeExport};`;
+}
+
 function renderRootZodExports(compiled: CompiledSchema): string {
   const metaVar = `${compiled.rawExport}Meta`;
+  const types = renderTypeExports(
+    compiled.typeExport,
+    compiled.typeInputExport,
+    compiled.inferredType,
+  );
+  const annotation = `z.ZodType<${compiled.typeExport}, ${compiled.typeExport}>`;
 
   if (compiled.hasExternalRefs) {
-    return `export const ${compiled.zodExport} = compileJsonSchema(
+    return `${types}
+
+export const ${compiled.zodExport}: ${annotation} = compileJsonSchema(
   ${compiled.rawExport} as Parameters<typeof compileJsonSchema>[0],
   { external: ${renderExternalMap(compiled)} },
 ).meta({
@@ -71,13 +100,12 @@ function renderRootZodExports(compiled: CompiledSchema): string {
   title: ${metaVar}.title,
   description: ${metaVar}.description,
   pathId: ${JSON.stringify(compiled.pathId)},
-});
-
-export type ${compiled.typeExport} = z.infer<typeof ${compiled.zodExport}>;
-export type ${compiled.typeInputExport} = z.input<typeof ${compiled.zodExport}>;`;
+}) as ${annotation};`;
   }
 
-  return `export const ${compiled.zodExport} = z
+  return `${types}
+
+export const ${compiled.zodExport}: ${annotation} = z
   .fromJSONSchema(
     ${compiled.rawExport} as Parameters<typeof z.fromJSONSchema>[0],
   )
@@ -86,10 +114,7 @@ export type ${compiled.typeInputExport} = z.input<typeof ${compiled.zodExport}>;
     title: ${metaVar}.title,
     description: ${metaVar}.description,
     pathId: ${JSON.stringify(compiled.pathId)},
-  });
-
-export type ${compiled.typeExport} = z.infer<typeof ${compiled.zodExport}>;
-export type ${compiled.typeInputExport} = z.input<typeof ${compiled.zodExport}>;`;
+  }) as ${annotation};`;
 }
 
 function renderDefZodExports(
@@ -105,26 +130,31 @@ function renderDefZodExports(
   const metaSuffix =
     metaFields.length > 0 ? `.meta({\n  ${metaFields.join(",\n  ")},\n})` : "";
 
+  const types = renderTypeExports(
+    def.typeExport,
+    def.typeInputExport,
+    def.inferredType,
+  );
+  const annotation = `z.ZodType<${def.typeExport}, ${def.typeExport}>`;
+
   if (compiled.hasExternalRefs) {
-    return `export const ${def.zodExport} = compileJsonSchema(
+    return `${types}
+
+export const ${def.zodExport}: ${annotation} = compileJsonSchema(
   {
     ...${compiled.rawExport},
     $ref: ${JSON.stringify(def.refPath)},
   } as Parameters<typeof compileJsonSchema>[0],
   { external: ${renderExternalMap(compiled)} },
-)${metaSuffix};
-
-export type ${def.typeExport} = z.infer<typeof ${def.zodExport}>;
-export type ${def.typeInputExport} = z.input<typeof ${def.zodExport}>;`;
+)${metaSuffix} as ${annotation};`;
   }
 
-  return `export const ${def.zodExport} = z.fromJSONSchema({
+  return `${types}
+
+export const ${def.zodExport}: ${annotation} = z.fromJSONSchema({
   ...${compiled.rawExport},
   $ref: ${JSON.stringify(def.refPath)},
-} as Parameters<typeof z.fromJSONSchema>[0])${metaSuffix};
-
-export type ${def.typeExport} = z.infer<typeof ${def.zodExport}>;
-export type ${def.typeInputExport} = z.input<typeof ${def.zodExport}>;`;
+} as Parameters<typeof z.fromJSONSchema>[0])${metaSuffix} as ${annotation};`;
 }
 
 export function renderZodFile(compiled: CompiledSchema): string {

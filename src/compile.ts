@@ -23,7 +23,10 @@ import { computeOutputRelativePath, computePathId } from "./resolve.js";
 import {
   buildDocumentRegistry,
   buildExportCatalog,
+  idAliases,
+  parseSchemaRef,
   resolveDocumentExternalDeps,
+  resolveExternalRef,
   type ExportTarget,
   type RegistryDocument,
 } from "./refs.js";
@@ -31,6 +34,7 @@ import {
   collectExternalRefs,
   compileJsonSchema,
 } from "./runtime/compile-json-schema.js";
+import { jsonSchemaToTs } from "./schema-types.js";
 import type {
   CompiledDef,
   CompiledSchema,
@@ -59,6 +63,15 @@ function getDefsSegment(json: JsonSchemaDocument): "$defs" | "definitions" {
     return "definitions";
   }
   return "$defs";
+}
+
+function unescapeJsonPointer(segment: string): string {
+  return segment.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+function rootSchemaBody(json: JsonSchemaDocument): unknown {
+  const { $defs: _defs, definitions: _definitions, ...rootBody } = json;
+  return rootBody;
 }
 
 function pickExport(
@@ -178,6 +191,7 @@ export function compileLoadedSchemas(
       ref,
       pathId: target.pathId,
       zodExport: target.zodExport,
+      typeExport: target.typeExport,
     }));
 
     // De-dupe deps by export for imports (same module may satisfy multiple refs).
@@ -185,6 +199,49 @@ export function compileLoadedSchemas(
     for (const dep of externalDeps) {
       uniqueDeps.set(`${dep.pathId}::${dep.zodExport}`, dep);
     }
+
+    const localIdAliases =
+      typeof entry.json.$id === "string" && entry.json.$id.length > 0
+        ? idAliases(entry.json.$id)
+        : [];
+
+    const resolveTypeRef = (ref: string): string => {
+      const { base, pointer } = parseSchemaRef(ref);
+      const isLocal =
+        base === "" ||
+        localIdAliases.includes(base) ||
+        (entry.json.$id !== undefined && base === entry.json.$id);
+
+      if (isLocal) {
+        const parts = pointer
+          .split("/")
+          .filter(Boolean)
+          .map(unescapeJsonPointer);
+        if (parts.length === 0) {
+          return typeExport;
+        }
+        if (
+          parts.length === 2 &&
+          (parts[0] === "$defs" || parts[0] === "definitions") &&
+          typeof parts[1] === "string"
+        ) {
+          return defTypeExportName(exportBase, parts[1]);
+        }
+        throw new Error(
+          `Unsupported local $ref pointer in "${ref}" on ${entry.pathId}`,
+        );
+      }
+
+      const target = resolveExternalRef(
+        ref,
+        registry,
+        catalog,
+        entry.absolutePath,
+      );
+      return target.typeExport;
+    };
+
+    const typegenOptions = { resolveRef: resolveTypeRef };
 
     let schema: ZodType = compileJsonSchema(entry.json, { external });
 
@@ -230,6 +287,7 @@ export function compileLoadedSchemas(
         zodExport: zodDefExportName(exportBase, defKey),
         typeExport: defTypeExportName(exportBase, defKey),
         typeInputExport: defTypeInputExportName(exportBase, defKey),
+        inferredType: jsonSchemaToTs(defJson ?? {}, typegenOptions),
         title: defJson?.title,
         description: defJson?.description,
       };
@@ -244,6 +302,7 @@ export function compileLoadedSchemas(
       zodExport,
       typeExport,
       typeInputExport,
+      inferredType: jsonSchemaToTs(rootSchemaBody(entry.json), typegenOptions),
       jsonImportVar,
       jsonImportPath: entry.absolutePath,
       sourcePath: entry.absolutePath,

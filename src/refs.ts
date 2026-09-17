@@ -3,7 +3,9 @@ import type { JsonSchemaDocument } from "./types.js";
 import {
   defDocumentId,
   defPathId,
+  defTypeExportName,
   nameBase,
+  typeExportName,
   zodDefExportName,
   zodExportName,
   type NamingMode,
@@ -25,6 +27,8 @@ export interface ExportTarget {
   absolutePath: string;
   /** Generated Zod export binding name */
   zodExport: string;
+  /** Generated TypeScript type alias for this export */
+  typeExport: string;
   /** Lookup key for byPath / meta */
   exportPathId: string;
   id?: string;
@@ -175,6 +179,7 @@ export function buildExportCatalog(
         pathId: entry.pathId,
         absolutePath: entry.absolutePath,
         zodExport: zodExportName(exportBase),
+        typeExport: typeExportName(exportBase),
         exportPathId: entry.pathId,
         id: entry.json.$id,
         kind: "root",
@@ -189,6 +194,7 @@ export function buildExportCatalog(
         pathId: entry.pathId,
         absolutePath: entry.absolutePath,
         zodExport: zodDefExportName(exportBase, defKey),
+        typeExport: defTypeExportName(exportBase, defKey),
         exportPathId: defPathId(entry.pathId, defKey, defsSegment),
         id: entry.json.$id
           ? defDocumentId(entry.json.$id, defKey, defsSegment)

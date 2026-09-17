@@ -356,8 +356,14 @@ describe("generateSchemas", () => {
     );
     expect(trustSignalZod).toContain('pathId: "rusl/trust-signal"');
     expect(trustSignalZod).toContain(
-      "export type RuslTrustSignal = z.infer<typeof zRuslTrustSignal>",
+      "export type RuslTrustSignal = {",
     );
+    expect(trustSignalZod).toContain("signal: string");
+    expect(trustSignalZod).toContain("confidence: number");
+    expect(trustSignalZod).toContain(
+      "export type RuslTrustSignalInput = RuslTrustSignal",
+    );
+    expect(trustSignalZod).not.toContain("z.infer<");
 
     const commonZod = await readFile(
       join(generatedRoot, "rusl/common.zod.ts"),
