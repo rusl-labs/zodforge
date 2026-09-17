@@ -72,6 +72,8 @@ export interface CompiledDef {
   zodExport: string;
   typeExport: string;
   typeInputExport: string;
+  /** TypeScript type expression inferred from the JSON Schema def. */
+  inferredType: string;
   title?: string;
   description?: string;
 }
@@ -84,6 +86,8 @@ export interface ExternalZodDep {
   pathId: string;
   /** Binding name to import, e.g. `zPragmaticGeoDefPoint` */
   zodExport: string;
+  /** Type alias to import, e.g. `PragmaticGeoDefPoint` */
+  typeExport: string;
 }
 
 export interface CompiledSchema {
@@ -95,6 +99,8 @@ export interface CompiledSchema {
   zodExport: string;
   typeExport: string;
   typeInputExport: string;
+  /** TypeScript type expression inferred from the JSON Schema. */
+  inferredType: string;
   jsonImportVar: string;
   jsonImportPath: string;
   sourcePath: string;

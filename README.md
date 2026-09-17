@@ -146,13 +146,13 @@ Each schema file produces two generated modules — raw (validator-agnostic) and
 // Raw JSON Schema — unconstrained escape hatch for AJV, docs, introspection
 import { userProfileRaw } from "./schemas/user/profile.raw";
 
-// Zod validation
+// Zod validation + generated TypeScript types
 import {
   zUserProfile,
   type UserProfile,
 } from "./schemas/user/profile.zod";
 
-const parsed = zUserProfile.parse({ /* … */ });
+const parsed: UserProfile = zUserProfile.parse({ /* … */ });
 ajv.compile(userProfileRaw);
 
 // Barrel import from a directory
@@ -166,7 +166,9 @@ const byPath = getSchemaByIdentifier("user/profile");
 const rawByPath = getRawSchemaByIdentifier("user/profile");
 ```
 
-Generated zod files use `z.fromJSONSchema(raw)` when a schema is self-contained. When it has external `$ref`s (e.g. Rusl `https://resources.rusl.com/...#/$defs/...`), zodforge wires them to **imports of the target Zod exports** and compiles via a small `_compile.ts` helper — so `us-address` reuses `zPragmaticGeoDefPoint` instead of inlining a copy. Referenced schemas must be in the same generate set and match by `$id` (Rusl `/schemas/` aliases included). Raw exports always keep the original `$ref` URIs.
+`UserProfile` (and `UserProfileInput`) is inferred from the JSON Schema at generate time — not from `z.infer` of an untyped `ZodType`. `const` becomes a literal, `oneOf` / `anyOf` a union, `allOf` an intersection, and `additionalProperties: false` a closed object. External `$ref`s use the target module's emitted type, the same way Zod exports are wired. The Zod export is annotated as `z.ZodType<UserProfile, UserProfile>` so `parse()` is typed too.
+
+Generated zod files use `z.fromJSONSchema(raw)` when a schema is self-contained. When it has external `$ref`s (e.g. Rusl `https://resources.rusl.com/...#/$defs/...`), zodforge wires them to **imports of the target Zod exports** and compiles via a small `_compile.ts` helper — so `us-address` reuses `zPragmaticGeoDefPoint` instead of inlining a copy. Sibling `anyOf` / `oneOf` / `allOf` keywords are intersected with object/array/scalar constraints beside them, matching Zod's `fromJSONSchema` for ref-free trees. Referenced schemas must be in the same generate set and match by `$id` (Rusl `/schemas/` aliases included). Raw exports always keep the original `$ref` URIs.
 
 ### 6. What gets generated
 

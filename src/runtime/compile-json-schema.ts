@@ -8,6 +8,11 @@
  *
  * Self-contained (only imports `zod`) so generate can copy this file into the
  * output tree as `_compile.ts`.
+ *
+ * When `oneOf` / `anyOf` / `allOf` sit beside `type`, `properties`, `required`,
+ * etc., both the applicator and the sibling constraints are compiled and
+ * intersected. Returning the applicator alone would drop the siblings — and
+ * that path is the one used whenever a subtree contains an external `$ref`.
  */
 import { fromJSONSchema } from "zod";
 import * as z from "zod";
@@ -103,6 +108,97 @@ function asJsonSchemaInput(
   return node as Parameters<typeof fromJSONSchema>[0];
 }
 
+/** JSON Schema keywords that constrain the instance (not annotations / applicators). */
+const SIBLING_CONSTRAINT_KEYS = new Set([
+  "$ref",
+  "$dynamicRef",
+  "type",
+  "enum",
+  "const",
+  "properties",
+  "required",
+  "additionalProperties",
+  "patternProperties",
+  "propertyNames",
+  "dependentSchemas",
+  "dependentRequired",
+  "items",
+  "prefixItems",
+  "contains",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+  "minContains",
+  "maxContains",
+  "unevaluatedItems",
+  "minProperties",
+  "maxProperties",
+  "unevaluatedProperties",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "format",
+  "if",
+  "then",
+  "else",
+  "not",
+  "contentEncoding",
+  "contentMediaType",
+  "contentSchema",
+]);
+
+function hasSiblingConstraints(node: Record<string, unknown>): boolean {
+  return Object.keys(node).some((key) => SIBLING_CONSTRAINT_KEYS.has(key));
+}
+
+function hasApplicators(node: Record<string, unknown>): boolean {
+  return (
+    (Array.isArray(node.oneOf) && node.oneOf.length > 0) ||
+    (Array.isArray(node.anyOf) && node.anyOf.length > 0) ||
+    (Array.isArray(node.allOf) && node.allOf.length > 0)
+  );
+}
+
+/** `required` keys that are not in `properties` — Zod's fromJSONSchema ignores these. */
+function hasRequiredKeysOutsideProperties(
+  node: Record<string, unknown>,
+): boolean {
+  if (!Array.isArray(node.required)) {
+    return false;
+  }
+  const properties = isPlainObject(node.properties) ? node.properties : {};
+  return node.required.some(
+    (key) => typeof key === "string" && !(key in properties),
+  );
+}
+
+function stripApplicators(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  const {
+    oneOf: _oneOf,
+    anyOf: _anyOf,
+    allOf: _allOf,
+    ...rest
+  } = node;
+  return rest;
+}
+
+function asUnion(options: ZodType[]): ZodType {
+  return options.length === 1
+    ? options[0]!
+    : z.union(options as [ZodType, ZodType, ...ZodType[]]);
+}
+
+function intersectAll(parts: ZodType[]): ZodType {
+  return parts.reduce((acc, part) => z.intersection(acc, part));
+}
+
 /**
  * Compile a JSON Schema document (or fragment) to a Zod schema.
  * External `$ref`s must be provided via `options.external`.
@@ -191,6 +287,12 @@ export function compileJsonSchema(
       shape[key] = propZod;
     }
 
+    for (const key of required) {
+      if (shape[key] === undefined) {
+        shape[key] = z.unknown();
+      }
+    }
+
     let objectSchema: z.ZodObject<Record<string, ZodType>> = z.object(shape);
 
     if (node.additionalProperties === false) {
@@ -237,6 +339,31 @@ export function compileJsonSchema(
     return arraySchema;
   }
 
+  function compileApplicators(
+    node: Record<string, unknown>,
+  ): ZodType | undefined {
+    const parts: ZodType[] = [];
+
+    if (Array.isArray(node.oneOf) && node.oneOf.length > 0) {
+      parts.push(asUnion(node.oneOf.map((item) => compileNode(item))));
+    }
+    if (Array.isArray(node.anyOf) && node.anyOf.length > 0) {
+      parts.push(asUnion(node.anyOf.map((item) => compileNode(item))));
+    }
+    if (Array.isArray(node.allOf) && node.allOf.length > 0) {
+      parts.push(intersectAll(node.allOf.map((item) => compileNode(item))));
+    }
+
+    if (parts.length === 0) {
+      return undefined;
+    }
+    return parts.length === 1 ? parts[0]! : intersectAll(parts);
+  }
+
+  function compileWithoutApplicators(node: Record<string, unknown>): ZodType {
+    return compileNode(stripApplicators(node));
+  }
+
   function compileNode(node: unknown): ZodType {
     if (typeof node === "boolean") {
       return node ? z.any() : z.never();
@@ -249,26 +376,23 @@ export function compileJsonSchema(
       return resolveRef(node.$ref);
     }
 
-    // No refs in this subtree — delegate to Zod (handles formats, patterns, …).
-    if (!containsRef(node)) {
+    // Self-contained nodes go through Zod unless we must compile locally:
+    // applicators beside sibling constraints, or `required` keys that are not
+    // in `properties` (fromJSONSchema treats those fragments as no-ops).
+    if (
+      !containsRef(node) &&
+      !(hasApplicators(node) && hasSiblingConstraints(node)) &&
+      !hasRequiredKeysOutsideProperties(node)
+    ) {
       return fromJSONSchema(asJsonSchemaInput(node));
     }
 
-    if (Array.isArray(node.oneOf) && node.oneOf.length > 0) {
-      const options = node.oneOf.map((item) => compileNode(item));
-      return options.length === 1
-        ? options[0]!
-        : z.union(options as [ZodType, ZodType, ...ZodType[]]);
-    }
-    if (Array.isArray(node.anyOf) && node.anyOf.length > 0) {
-      const options = node.anyOf.map((item) => compileNode(item));
-      return options.length === 1
-        ? options[0]!
-        : z.union(options as [ZodType, ZodType, ...ZodType[]]);
-    }
-    if (Array.isArray(node.allOf) && node.allOf.length > 0) {
-      const parts = node.allOf.map((item) => compileNode(item));
-      return parts.reduce((acc, part) => z.intersection(acc, part));
+    const applicator = compileApplicators(node);
+    if (applicator) {
+      if (!hasSiblingConstraints(node)) {
+        return applicator;
+      }
+      return z.intersection(compileWithoutApplicators(node), applicator);
     }
 
     const types = Array.isArray(node.type)
@@ -280,7 +404,8 @@ export function compileJsonSchema(
     if (
       types.includes("object") ||
       node.properties !== undefined ||
-      node.additionalProperties !== undefined
+      node.additionalProperties !== undefined ||
+      node.required !== undefined
     ) {
       return compileObject(node);
     }
