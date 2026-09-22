@@ -74,7 +74,19 @@ export function hasRootValidator(json: JsonSchemaDocument): boolean {
   if (json.properties) {
     return true;
   }
+  if (json.additionalProperties !== undefined) {
+    return true;
+  }
+  if (json.required) {
+    return true;
+  }
+  if (json.patternProperties) {
+    return true;
+  }
   if (json.items) {
+    return true;
+  }
+  if (json.prefixItems) {
     return true;
   }
   return false;
