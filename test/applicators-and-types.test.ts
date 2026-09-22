@@ -309,7 +309,7 @@ describe("jsonSchemaToTs", () => {
         { $ref: "https://example.com/base", required: ["a"] },
         { resolveRef: () => "Base" },
       ),
-    ).toBe("Base & { a: unknown }");
+    ).toBe("Base & { a: unknown; [key: string]: unknown }");
   });
 
   test("draft-07 items arrays emit tuples", () => {
