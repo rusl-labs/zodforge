@@ -277,6 +277,139 @@ describe("jsonSchemaToTs", () => {
       jsonSchemaToTs(schemaKind, { resolveRef: () => "never" }),
     ).toBe('{ kind: "alpha" } | { kind: "beta" }');
   });
+
+  test("closed patternProperties become an index signature", () => {
+    expect(
+      jsonSchemaToTs(
+        {
+          type: "object",
+          additionalProperties: false,
+          patternProperties: { "^x_": { $ref: "https://example.com/num" } },
+        },
+        { resolveRef: () => "Num" },
+      ),
+    ).toBe("Record<string, Num>");
+    expect(
+      jsonSchemaToTs(
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["name"],
+          properties: { name: { type: "string" } },
+          patternProperties: { "^x_": { type: "number" } },
+        },
+        { resolveRef: () => "never" },
+      ),
+    ).toBe("{ name: string; [key: string]: number | string }");
+  });
+
+  test("$ref siblings intersect the resolved type", () => {
+    expect(
+      jsonSchemaToTs(
+        { $ref: "https://example.com/base", required: ["a"] },
+        { resolveRef: () => "Base" },
+      ),
+    ).toBe("Base & { a: unknown; [key: string]: unknown }");
+  });
+
+  test("draft-07 items arrays emit tuples", () => {
+    expect(
+      jsonSchemaToTs(
+        {
+          type: "array",
+          items: [{ $ref: "https://example.com/s" }, { type: "number" }],
+          additionalItems: false,
+        },
+        { resolveRef: () => "S" },
+      ),
+    ).toBe("[S, number]");
+    expect(
+      jsonSchemaToTs(
+        {
+          type: "array",
+          items: [{ $ref: "https://example.com/s" }],
+        },
+        { resolveRef: () => "S" },
+      ),
+    ).toBe("[S, ...unknown[]]");
+  });
+});
+
+describe("patternProperties, tuples, and $ref siblings on the ref path", () => {
+  const num = compileJsonSchema({ type: "number" });
+  const str = compileJsonSchema({ type: "string" });
+  const base = compileJsonSchema({
+    type: "object",
+    properties: {
+      a: { type: "string" },
+      b: { type: "number" },
+    },
+  });
+
+  test("patternProperties validate matching keys when values are refs", () => {
+    const schema = compileJsonSchema(
+      {
+        type: "object",
+        patternProperties: { "^x_": { $ref: "https://example.com/num" } },
+      },
+      { external: { "https://example.com/num": num } },
+    );
+    expect(schema.parse({ x_a: 1, y: "ok" })).toEqual({ x_a: 1, y: "ok" });
+    expect(schema.safeParse({ x_a: "no" }).success).toBe(false);
+  });
+
+  test("patternProperties keep additionalProperties: false closed for other names", () => {
+    const schema = compileJsonSchema(
+      {
+        type: "object",
+        additionalProperties: false,
+        patternProperties: { "^x_": { $ref: "https://example.com/num" } },
+      },
+      { external: { "https://example.com/num": num } },
+    );
+    expect(schema.parse({ x_a: 1 })).toEqual({ x_a: 1 });
+    expect(schema.safeParse({ x_a: "no" }).success).toBe(false);
+    expect(schema.safeParse({ y: 1 }).success).toBe(false);
+  });
+
+  test("draft-07 items tuples compile prefix refs instead of any[]", () => {
+    const schema = compileJsonSchema(
+      {
+        type: "array",
+        items: [{ $ref: "https://example.com/str" }, { type: "number" }],
+        additionalItems: false,
+      },
+      { external: { "https://example.com/str": str } },
+    );
+    expect(schema.parse(["a", 1])).toEqual(["a", 1]);
+    expect(schema.safeParse(["a"]).success).toBe(false);
+    expect(schema.safeParse(["a", "b"]).success).toBe(false);
+    expect(schema.safeParse(["a", 1, true]).success).toBe(false);
+  });
+
+  test("draft-07 items tuples stay open when additionalItems is omitted", () => {
+    const schema = compileJsonSchema(
+      {
+        type: "array",
+        items: [{ $ref: "https://example.com/str" }],
+      },
+      { external: { "https://example.com/str": str } },
+    );
+    expect(schema.parse(["a", 1])).toEqual(["a", 1]);
+    expect(schema.safeParse([1]).success).toBe(false);
+  });
+
+  test("$ref siblings apply required from the adjacent keywords", () => {
+    const schema = compileJsonSchema(
+      {
+        $ref: "https://example.com/base",
+        required: ["a"],
+      },
+      { external: { "https://example.com/base": base } },
+    );
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.parse({ a: "x", extra: true })).toEqual({ a: "x", extra: true });
+  });
 });
 
 describe("generated types and validators", () => {
@@ -436,6 +569,43 @@ const numeric: ClosedNumeric = { x: 1 };
 const nonNumeric: ClosedNumeric = { x: "bad" };
 void numeric;
 void nonNumeric;
+
+type PatternClosed = ${jsonSchemaToTs(
+  {
+    type: "object",
+    additionalProperties: false,
+    patternProperties: { "^x_": { $ref: "https://example.com/num" } },
+  },
+  { resolveRef: () => "number" },
+)};
+const patternOk: PatternClosed = { x_a: 1 };
+const _patternValue: Equals<PatternClosed[string], number> = true;
+void patternOk;
+void _patternValue;
+
+type RefRequired = ${jsonSchemaToTs(
+  { $ref: "A", required: ["x"] },
+  { resolveRef: () => "A" },
+)};
+const refRequired: RefRequired = { x: "Jan", revenue: 12 };
+// @ts-expect-error $ref siblings still require the adjacent key
+const missingRefRequired: RefRequired = { revenue: 12 };
+void refRequired;
+void missingRefRequired;
+
+type DraftTuple = ${jsonSchemaToTs(
+  {
+    type: "array",
+    items: [{ $ref: "https://example.com/s" }, { type: "number" }],
+    additionalItems: false,
+  },
+  { resolveRef: () => "string" },
+)};
+const tupleOk: DraftTuple = ["a", 1];
+// @ts-expect-error closed draft-07 tuples reject extra items
+const tupleExtra: DraftTuple = ["a", 1, true];
+void tupleOk;
+void tupleExtra;
 
 // @ts-expect-error 42 is not B
 const badNumber: B = 42;

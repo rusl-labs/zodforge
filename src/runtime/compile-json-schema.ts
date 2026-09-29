@@ -13,6 +13,11 @@
  * etc., both the applicator and the sibling constraints are compiled and
  * intersected. Returning the applicator alone would drop the siblings — and
  * that path is the one used whenever a subtree contains an external `$ref`.
+ *
+ * `$ref` with sibling keywords is compiled as an intersection (JSON Schema
+ * 2020-12). Draft-07 `items` arrays compile as tuples. `patternProperties`
+ * validate matching keys on this path, including next to
+ * `additionalProperties: false`.
  */
 import { fromJSONSchema } from "zod";
 import * as z from "zod";
@@ -156,6 +161,10 @@ function hasSiblingConstraints(node: Record<string, unknown>): boolean {
   return Object.keys(node).some((key) => SIBLING_CONSTRAINT_KEYS.has(key));
 }
 
+function hasInstanceConstraints(node: Record<string, unknown>): boolean {
+  return hasApplicators(node) || hasSiblingConstraints(node);
+}
+
 function hasApplicators(node: Record<string, unknown>): boolean {
   return (
     (Array.isArray(node.oneOf) && node.oneOf.length > 0) ||
@@ -268,6 +277,77 @@ export function compileJsonSchema(
     return compiled;
   }
 
+  function compilePatternEntries(
+    node: Record<string, unknown>,
+  ): Array<{ regex: RegExp; schema: ZodType }> {
+    if (!isPlainObject(node.patternProperties)) {
+      return [];
+    }
+    return Object.entries(node.patternProperties).map(([pattern, schema]) => ({
+      regex: new RegExp(pattern),
+      schema: compileNode(schema),
+    }));
+  }
+
+  function compilePatternAndAdditional(
+    properties: Record<string, unknown>,
+    patterns: Array<{ regex: RegExp; schema: ZodType }>,
+    additional: unknown,
+  ): ZodType | undefined {
+    const additionalSchema =
+      additional !== undefined && additional !== true && additional !== false
+        ? compileNode(additional)
+        : undefined;
+    const needsPatternCheck = patterns.length > 0;
+    const needsAdditionalCheck =
+      additional === false || additionalSchema !== undefined;
+    if (!needsPatternCheck && !needsAdditionalCheck) {
+      return undefined;
+    }
+
+    return z.unknown().superRefine((value, ctx) => {
+      if (!isPlainObject(value)) {
+        return;
+      }
+      for (const [key, val] of Object.entries(value)) {
+        let matchedPattern = false;
+        for (const { regex, schema } of patterns) {
+          if (!regex.test(key)) {
+            continue;
+          }
+          matchedPattern = true;
+          const result = schema.safeParse(val);
+          if (!result.success) {
+            ctx.addIssue({
+              code: "custom",
+              path: [key],
+              message: result.error.issues[0]?.message ?? "Invalid input",
+            });
+          }
+        }
+        if (Object.hasOwn(properties, key) || matchedPattern) {
+          continue;
+        }
+        if (additional === false) {
+          ctx.addIssue({
+            code: "custom",
+            path: [key],
+            message: "Additional properties are not allowed",
+          });
+        } else if (additionalSchema) {
+          const result = additionalSchema.safeParse(val);
+          if (!result.success) {
+            ctx.addIssue({
+              code: "custom",
+              path: [key],
+              message: result.error.issues[0]?.message ?? "Invalid input",
+            });
+          }
+        }
+      }
+    });
+  }
+
   function compileObject(node: Record<string, unknown>): ZodType {
     const properties = isPlainObject(node.properties)
       ? (node.properties as Record<string, unknown>)
@@ -293,11 +373,13 @@ export function compileJsonSchema(
       }
     }
 
+    const patterns = compilePatternEntries(node);
     let objectSchema: z.ZodObject<Record<string, ZodType>> = z.object(shape);
 
-    if (node.additionalProperties === false) {
+    if (node.additionalProperties === false && patterns.length === 0) {
       objectSchema = objectSchema.strict();
     } else if (
+      patterns.length === 0 &&
       node.additionalProperties !== undefined &&
       node.additionalProperties !== true
     ) {
@@ -308,20 +390,46 @@ export function compileJsonSchema(
       objectSchema = objectSchema.catchall(z.unknown());
     }
 
-    return objectSchema;
+    const extra =
+      patterns.length > 0
+        ? compilePatternAndAdditional(
+            properties,
+            patterns,
+            node.additionalProperties,
+          )
+        : undefined;
+    return extra ? intersectAll([objectSchema, extra]) : objectSchema;
+  }
+
+  function compileTuple(prefix: unknown[], rest: unknown): ZodType {
+    if (prefix.length === 0) {
+      if (rest === false) {
+        return z.tuple([]);
+      }
+      if (rest !== undefined && rest !== true) {
+        return z.array(compileNode(rest));
+      }
+      return z.array(z.unknown());
+    }
+
+    const items = prefix.map((item) => compileNode(item));
+    const tuple = z.tuple(items as [ZodType, ...ZodType[]]);
+    if (rest === false) {
+      return tuple;
+    }
+    if (rest !== undefined && rest !== true) {
+      return tuple.rest(compileNode(rest));
+    }
+    return tuple.rest(z.unknown());
   }
 
   function compileArray(node: Record<string, unknown>): ZodType {
     if (Array.isArray(node.prefixItems)) {
-      const items = node.prefixItems.map((item) => compileNode(item));
-      let tuple = z.tuple(items as [ZodType, ...ZodType[]]);
-      if (node.items === false) {
-        return tuple;
-      }
-      if (node.items !== undefined && node.items !== true) {
-        return tuple.rest(compileNode(node.items));
-      }
-      return tuple;
+      return compileTuple(node.prefixItems, node.items);
+    }
+
+    if (Array.isArray(node.items)) {
+      return compileTuple(node.items, node.additionalItems);
     }
 
     const items =
@@ -487,7 +595,12 @@ export function compileJsonSchema(
     }
 
     if (typeof node.$ref === "string") {
-      return resolveRef(node.$ref);
+      const resolved = resolveRef(node.$ref);
+      const { $ref: _ref, ...rest } = node;
+      if (!hasInstanceConstraints(rest)) {
+        return resolved;
+      }
+      return intersectAll([resolved, compileNode(rest)]);
     }
 
     // Self-contained nodes go through Zod unless we must compile locally:
@@ -550,7 +663,8 @@ export function compileJsonSchema(
       types.includes("object") ||
       node.properties !== undefined ||
       node.additionalProperties !== undefined ||
-      node.required !== undefined
+      node.required !== undefined ||
+      node.patternProperties !== undefined
     ) {
       return compileObject(node);
     }
@@ -603,6 +717,9 @@ export function compileJsonSchema(
     rootBody.anyOf !== undefined ||
     rootBody.oneOf !== undefined ||
     rootBody.properties !== undefined ||
+    rootBody.additionalProperties !== undefined ||
+    rootBody.required !== undefined ||
+    rootBody.patternProperties !== undefined ||
     rootBody.items !== undefined ||
     rootBody.prefixItems !== undefined;
 

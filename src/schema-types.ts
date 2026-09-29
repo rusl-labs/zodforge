@@ -10,6 +10,46 @@ export interface JsonSchemaToTsOptions {
 
 const APPLICATOR_KEYS = new Set(["oneOf", "anyOf", "allOf"]);
 
+const CONSTRAINT_KEYS = new Set([
+  "type",
+  "enum",
+  "const",
+  "properties",
+  "required",
+  "additionalProperties",
+  "patternProperties",
+  "propertyNames",
+  "dependentSchemas",
+  "dependentRequired",
+  "items",
+  "prefixItems",
+  "contains",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+  "minContains",
+  "maxContains",
+  "unevaluatedItems",
+  "minProperties",
+  "maxProperties",
+  "unevaluatedProperties",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "format",
+  "if",
+  "then",
+  "else",
+  "not",
+  "$ref",
+  "$dynamicRef",
+]);
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -168,10 +208,22 @@ function objectToTs(
   }
 
   const additional = node.additionalProperties;
+  const patternTypes = isPlainObject(node.patternProperties)
+    ? Object.values(node.patternProperties).map((schema) =>
+        jsonSchemaToTs(schema, options),
+      )
+    : [];
 
   if (additional === false) {
     if (fields.length === 0) {
-      return "Record<string, never>";
+      if (patternTypes.length === 0) {
+        return "Record<string, never>";
+      }
+      return `Record<string, ${joinUnion(patternTypes)}>`;
+    }
+    if (patternTypes.length > 0) {
+      const indexType = joinUnion([...patternTypes, ...propTypes]);
+      fields.push(`[key: string]: ${indexType}`);
     }
     return formatObject(fields);
   }
@@ -186,7 +238,8 @@ function objectToTs(
     if (additional === undefined || additional === true) {
       return "Record<string, unknown>";
     }
-    return `Record<string, ${jsonSchemaToTs(additional, options)}>`;
+    const additionalType = jsonSchemaToTs(additional, options);
+    return `Record<string, ${joinUnion([additionalType, ...patternTypes])}>`;
   }
 
   if (additional === undefined || additional === true) {
@@ -196,7 +249,7 @@ function objectToTs(
 
   if (additional !== undefined) {
     const additionalType = jsonSchemaToTs(additional, options);
-    const indexType = joinUnion([additionalType, ...propTypes]);
+    const indexType = joinUnion([additionalType, ...patternTypes, ...propTypes]);
     fields.push(`[key: string]: ${indexType}`);
   }
 
@@ -300,9 +353,11 @@ function schemaWithoutApplicatorsToTs(
  * Infer a TypeScript type expression from a JSON Schema node.
  *
  * External and local `$ref`s are left as identifiers via `resolveRef`.
- * `oneOf` / `anyOf` become unions, `allOf` an intersection, `const` a literal,
- * and `additionalProperties: false` a closed object. Sibling applicators are
- * intersected with the remaining constraints, matching `compileJsonSchema`.
+ * Keywords beside `$ref` are intersected with the target. `oneOf` / `anyOf`
+ * become unions, `allOf` an intersection, `const` a literal, and
+ * `additionalProperties: false` a closed object. `patternProperties` contribute
+ * to the index signature on closed objects. Sibling applicators are intersected
+ * with the remaining constraints, matching `compileJsonSchema`.
  */
 export function jsonSchemaToTs(
   node: unknown,
@@ -324,7 +379,22 @@ function schemaToTs(
   }
 
   if (typeof node.$ref === "string") {
-    return options.resolveRef(node.$ref);
+    const refType = options.resolveRef(node.$ref);
+    const rest: Record<string, unknown> = {};
+    let hasRestConstraints = false;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "$ref") {
+        continue;
+      }
+      rest[key] = value;
+      if (APPLICATOR_KEYS.has(key) || CONSTRAINT_KEYS.has(key)) {
+        hasRestConstraints = true;
+      }
+    }
+    if (!hasRestConstraints) {
+      return refType;
+    }
+    return joinIntersection([refType, schemaToTs(rest, options, closedSibling)]);
   }
 
   const closed = closedSibling || node.additionalProperties === false;
@@ -352,45 +422,7 @@ function schemaToTs(
       continue;
     }
     rest[key] = value;
-    if (
-      key === "type" ||
-      key === "enum" ||
-      key === "const" ||
-      key === "properties" ||
-      key === "required" ||
-      key === "additionalProperties" ||
-      key === "patternProperties" ||
-      key === "propertyNames" ||
-      key === "dependentSchemas" ||
-      key === "dependentRequired" ||
-      key === "items" ||
-      key === "prefixItems" ||
-      key === "contains" ||
-      key === "minItems" ||
-      key === "maxItems" ||
-      key === "uniqueItems" ||
-      key === "minContains" ||
-      key === "maxContains" ||
-      key === "unevaluatedItems" ||
-      key === "minProperties" ||
-      key === "maxProperties" ||
-      key === "unevaluatedProperties" ||
-      key === "minimum" ||
-      key === "maximum" ||
-      key === "exclusiveMinimum" ||
-      key === "exclusiveMaximum" ||
-      key === "multipleOf" ||
-      key === "minLength" ||
-      key === "maxLength" ||
-      key === "pattern" ||
-      key === "format" ||
-      key === "if" ||
-      key === "then" ||
-      key === "else" ||
-      key === "not" ||
-      key === "$ref" ||
-      key === "$dynamicRef"
-    ) {
+    if (CONSTRAINT_KEYS.has(key)) {
       hasRestConstraints = true;
     }
   }
